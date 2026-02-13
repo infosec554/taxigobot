@@ -1,52 +1,56 @@
 <!DOCTYPE html>
 <html lang="uz">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Taxi Radar Calendar</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <title>Taxi Calendar</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
-<body class="dark-theme">
+
+<body>
     <div class="app-container">
         <header>
-            <div class="header-top">
-                <button id="prevMonth" class="nav-btn">❮</button>
-                <div id="currentMonthYear" class="month-display">Fevral 2026</div>
-                <button id="nextMonth" class="nav-btn">❯</button>
+            <div class="header-left">
+                <span id="monthDisplay" class="month-display">Avgust 2026</span>
             </div>
-            <div class="view-switch">
-                <button id="gridBtn" class="switch-btn active">📅 Panel</button>
-                <button id="listBtn" class="switch-btn">📋 Ro'yxat</button>
+            <div class="nav-buttons">
+                <button id="prevBtn" class="nav-btn">❮</button>
+                <button id="nextBtn" class="nav-btn">❯</button>
             </div>
         </header>
 
-        <main id="appContent">
-            <!-- Grid View -->
-            <div id="calendarGrid" class="calendar-grid">
-                <div class="weekday">Du</div>
-                <div class="weekday">Se</div>
-                <div class="weekday">Ch</div>
-                <div class="weekday">Pa</div>
-                <div class="weekday">Ju</div>
-                <div class="weekday">Sh</div>
-                <div class="weekday">Ya</div>
-                <!-- Days will be injected here -->
-            </div>
-
-            <!-- List View (Agenda) -->
-            <div id="orderList" class="order-list hidden">
-                <!-- Orders grouped by date will be injected here -->
-            </div>
+        <main id="calendarGrid" class="calendar-grid">
+            <div class="weekday">Du</div>
+            <div class="weekday">Se</div>
+            <div class="weekday">Ch</div>
+            <div class="weekday">Pa</div>
+            <div class="weekday">Ju</div>
+            <div class="weekday">Sh</div>
+            <div class="weekday">Ya</div>
+            <!-- Days will be dynamically injected -->
         </main>
 
-        <!-- Order Detail Modal -->
+        <!-- Order Modal -->
         <div id="orderModal" class="modal hidden">
-            <div class="modal-content glass">
-                <button class="close-modal">&times;</button>
-                <div id="modalBody"></div>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <span id="modalDate" style="font-weight: 500; color: var(--google-gray);">13-avgust, Juma</span>
+                    <button id="closeModal"
+                        style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <h2 id="modalTitle" class="modal-title">Toshkent ➞ Samarqand</h2>
+                    <p id="modalTime" class="modal-info">🕒 14:30</p>
+                    <p id="modalPax" class="modal-info">👥 3 kishi</p>
+                    <p id="modalPrice" class="modal-info" style="color: var(--google-blue); font-weight: 700;">💰
+                        250,000 so'm</p>
+                </div>
+                <div class="action-bar">
+                    <button id="cancelModal" class="btn btn-secondary">Yopish</button>
+                    <button id="takeBtn" class="btn btn-primary">ZAKAZNI OLISH</button>
+                </div>
             </div>
         </div>
     </div>
@@ -54,4 +58,5 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="script.js"></script>
 </body>
+
 </html>

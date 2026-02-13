@@ -74,11 +74,42 @@ func (b *Bot) handleWebApp(c tele.Context) error {
 }
 
 func (b *Bot) handleTakeOrderWithID(c tele.Context, id int64) error {
-	b.Stg.Order().TakeOrder(context.Background(), id, c.Sender().ID)
+	session := b.Sessions[c.Sender().ID]
+	var dbID int64
+	if session != nil {
+		dbID = session.DBID
+	} else {
+		user := b.getCurrentUser(c)
+		dbID = user.ID
+	}
+
+	err := b.Stg.Order().TakeOrder(context.Background(), id, dbID)
+	if err != nil {
+		return c.Send("❌ Buyurtmani qabul qilishda xatolik: " + err.Error())
+	}
+
 	c.Send("✅ Buyurtma qabul qilindi!")
+
 	order, _ := b.Stg.Order().GetByID(context.Background(), id)
 	driver, _ := b.Stg.User().Get(context.Background(), c.Sender().ID)
-	b.notifyUser(order.ClientID, fmt.Sprintf(messages["uz"]["notif_taken"], id, driver.FullName))
+
+	// Sync with Google Calendar
+	gCal := NewGoogleCalendarService()
+	gCal.AddOrderToCalendar(order)
+
+	if order != nil && driver != nil {
+		phone := "Noma'lum"
+		if driver.Phone != nil {
+			phone = *driver.Phone
+		}
+		profile := fmt.Sprintf("<a href=\"tg://user?id=%d\">%s</a>", driver.TelegramID, driver.FullName)
+		if driver.Username != "" {
+			profile += fmt.Sprintf(" (@%s)", driver.Username)
+		}
+
+		msg := fmt.Sprintf(messages["uz"]["notif_taken"], id, driver.FullName, phone, profile)
+		b.notifyUser(order.ClientID, msg)
+	}
 	return nil
 }
 
@@ -134,7 +165,7 @@ var messages = map[string]map[string]string{
 		"order_created": "✅ Buyurtmangiz qabul qilindi!",
 		"no_orders":     "📭 Hozircha faol buyurtmalar yo'q.",
 		"notif_new":     "🔔 YANGI ZAKAZ!\n🆔 #%d\n💰 Narx: %d %s\n📍 Yo'l: %s",
-		"notif_taken":   "🚖 Buyurtmangiz haydovchi tomonidan qabul qilindi!\n🆔 ID: #%d\n🚗 Haydovchi: %s",
+		"notif_taken":   "🚖 Buyurtmangiz haydovchi tomonidan qabul qilindi!\n\n🆔 ID: #%d\n🚗 Haydovchi: %s\n📞 Tel: %s\n👤 Profil: %s",
 		"notif_done":    "🏁 Buyurtmangiz muvaffaqiyatli yakunlandi. Rahmat!",
 		"notif_cancel":  "⚠️ Buyurtma #%d bekor qilindi.",
 	},
@@ -190,7 +221,12 @@ func (b *Bot) handleStart(c tele.Context) error {
 		return c.Send("🚫 <b>Kirish taqiqlandi!</b>\n\nSiz haydovchi sifatida ro'yxatdan o'tgansiz.\n\n👇 Iltimos, haydovchilar botiga o'ting:\n@drivertaxisgo_bot", tele.ModeHTML)
 	}
 
-	b.Sessions[c.Sender().ID] = &UserSession{DBID: user.ID, State: StateIdle}
+	// Always initialize/reset session on /start
+	b.Sessions[c.Sender().ID] = &UserSession{
+		DBID:      user.ID,
+		State:     StateIdle,
+		OrderData: &models.Order{ClientID: user.ID},
+	}
 
 	if user.Status == "pending" {
 		menu := &tele.ReplyMarkup{ResizeKeyboard: true}
@@ -350,7 +386,11 @@ func (b *Bot) handleMyOrdersDriver(c tele.Context) error {
 func (b *Bot) handleAdminUsers(c tele.Context) error {
 	users, _ := b.Stg.User().GetAll(context.Background())
 	for _, u := range users {
-		txt := fmt.Sprintf("👤 %s\n📞 %s\nRole: %s\nStatus: %s", u.FullName, u.Phone, u.Role, u.Status)
+		phone := "Noma'lum"
+		if u.Phone != nil {
+			phone = *u.Phone
+		}
+		txt := fmt.Sprintf("👤 %s\n📞 %s\nRole: %s\nStatus: %s", u.FullName, phone, u.Role, u.Status)
 		menu := &tele.ReplyMarkup{}
 		btnRole := menu.Data("🚕 Driver qilish", fmt.Sprintf("set_role_driver_%d", u.TelegramID))
 		if u.Role == "driver" {
@@ -558,8 +598,6 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		session.OrderData.Passengers = num
 		session.State = StateDateTime
 
-		b.Bot.Edit(c.Callback().Message, messages["uz"]["order_pass"])
-
 		// Show calendar for current month
 		now := time.Now()
 		return b.generateCalendar(c, now.Year(), int(now.Month()))
@@ -605,15 +643,8 @@ func (b *Bot) handleCallback(c tele.Context) error {
 
 	if strings.HasPrefix(data, "take_") {
 		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "take_"), 10, 64)
-		err := b.Stg.Order().TakeOrder(context.Background(), id, session.DBID)
-		if err != nil {
-			return c.Respond(&tele.CallbackResponse{Text: "Xatolik: " + err.Error(), ShowAlert: true})
-		}
 		b.Bot.Edit(c.Callback().Message, "✅ Buyurtma qabul qilindi!")
-		order, _ := b.Stg.Order().GetByID(context.Background(), id)
-		driver, _ := b.Stg.User().Get(context.Background(), c.Sender().ID)
-		b.notifyUser(order.ClientID, fmt.Sprintf(messages["uz"]["notif_taken"], id, driver.FullName))
-		return c.Respond()
+		return b.handleTakeOrderWithID(c, id)
 	}
 
 	if strings.HasPrefix(data, "complete_") {
@@ -621,7 +652,9 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		b.Stg.Order().CompleteOrder(context.Background(), id)
 		b.Bot.Edit(c.Callback().Message, "🏁 Buyurtma yakunlandi!")
 		order, _ := b.Stg.Order().GetByID(context.Background(), id)
-		b.notifyUser(order.ClientID, messages["uz"]["notif_done"])
+		if order != nil {
+			b.notifyUser(order.ClientID, messages["uz"]["notif_done"])
+		}
 		return c.Respond()
 	}
 
@@ -632,16 +665,32 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		return c.Respond()
 	}
 
+	if data == "agenda_view" {
+		return b.handleDriverAgenda(c)
+	}
+	if data == "native_cal" {
+		now := time.Now()
+		return b.generateCalendarWithPrefix(c, now.Year(), int(now.Month()), "sc_cal_")
+	}
+
 	if strings.HasPrefix(data, "sc_nav_") {
 		parts := strings.Split(data, "_")
-		year, _ := strconv.Atoi(parts[2])
-		month, _ := strconv.Atoi(parts[3])
-		return b.generateCalendarWithPrefix(c, year, month, "sc_cal_")
+		if len(parts) >= 4 {
+			year, _ := strconv.Atoi(parts[2])
+			month, _ := strconv.Atoi(parts[3])
+			return b.generateCalendarWithPrefix(c, year, month, "sc_cal_")
+		}
+		return nil
 	}
 
 	if strings.HasPrefix(data, "sc_cal_") {
 		dateStr := strings.TrimPrefix(data, "sc_cal_")
 		return b.handleDriverDateSearch(c, dateStr)
+	}
+
+	if strings.HasPrefix(data, "sc_cal_all_") {
+		dateStr := strings.TrimPrefix(data, "sc_cal_all_")
+		return b.handleDriverDateSearchAll(c, dateStr)
 	}
 
 	if strings.HasPrefix(data, "user_blk_") || strings.HasPrefix(data, "user_act_") || strings.HasPrefix(data, "set_role_") {
@@ -715,11 +764,18 @@ func (b *Bot) handleCallback(c tele.Context) error {
 
 	switch data {
 	case "confirm_yes":
+		if session.OrderData == nil || session.OrderData.FromLocationID == 0 || session.OrderData.ToLocationID == 0 {
+			b.Log.Warning("Invalid order data in session for confirm_yes", logger.Int64("user_id", c.Sender().ID))
+			return c.Send("⚠️ <b>Xatolik:</b> Buyurtma ma'lumotlari topilmadi. Iltimos, /start bosib buyurtmani qaytadan shakllantiring.", tele.ModeHTML)
+		}
 		session.OrderData.Status = "active"
 		order, err := b.Stg.Order().Create(context.Background(), session.OrderData)
 		if err == nil {
 			c.Send(messages["uz"]["order_created"])
 			b.notifyDrivers(order.ID, session.OrderData.FromLocationID, session.OrderData.ToLocationID, session.OrderData.TariffID, fmt.Sprintf(messages["uz"]["notif_new"], order.ID, order.Price, order.Currency, session.TempString))
+		} else {
+			b.Log.Error("Order creation failed", logger.Error(err))
+			c.Send("❌ Buyurtma yaratishda xatolik yuz berdi.")
 		}
 		session.State = StateIdle
 		return b.showMenu(c, b.getCurrentUser(c))
@@ -804,7 +860,7 @@ func (b *Bot) notifyUser(dbID int64, text string) {
 	var teleID int64
 	b.DB.QueryRow(context.Background(), "SELECT telegram_id FROM users WHERE id=$1", dbID).Scan(&teleID)
 	if teleID != 0 {
-		target.Bot.Send(&tele.User{ID: teleID}, text)
+		target.Bot.Send(&tele.User{ID: teleID}, text, tele.ModeHTML)
 	}
 }
 
@@ -814,28 +870,49 @@ func (b *Bot) notifyDrivers(orderID, fromID, toID, tariffID int64, text string) 
 		target = b.Peer
 	}
 
+	// Get drivers explicitly matching the route
+	routeDriversMap := make(map[int64]bool)
 	routeDrivers, _ := b.Stg.Route().GetDriversByRoute(context.Background(), fromID, toID)
+	for _, id := range routeDrivers {
+		routeDriversMap[id] = true
+	}
 
 	targetIDs := make(map[int64]bool)
+	users, _ := b.Stg.User().GetAll(context.Background())
 
-	if len(routeDrivers) > 0 {
-		for _, driverID := range routeDrivers {
-			enabled, _ := b.Stg.Tariff().GetEnabled(context.Background(), driverID)
-			if enabled[tariffID] {
-				targetIDs[driverID] = true
-			}
+	for _, u := range users {
+		if u.Role != "driver" && u.Role != "admin" {
+			continue
 		}
-	} else {
-		users, _ := b.Stg.User().GetAll(context.Background())
-		for _, u := range users {
-			if u.Role == "driver" || u.Role == "admin" {
-				targetIDs[u.ID] = true
-			}
+
+		// Check tariff first
+		enabled, _ := b.Stg.Tariff().GetEnabled(context.Background(), u.ID)
+		if !enabled[tariffID] {
+			continue
+		}
+
+		// Route Logic:
+		// 1. If driver matches route -> Notify
+		// 2. If driver has NO routes at all -> Notify (Default)
+		// 3. If driver has routes but doesn't match -> Skip
+
+		if routeDriversMap[u.ID] {
+			targetIDs[u.ID] = true
+			continue
+		}
+
+		// Check if driver has any routes
+		driverRoutes, _ := b.Stg.Route().GetDriverRoutes(context.Background(), u.ID)
+		if len(driverRoutes) == 0 {
+			targetIDs[u.ID] = true
 		}
 	}
 
 	menu := &tele.ReplyMarkup{}
-	menu.Inline(menu.Row(menu.Data("📥 Zakazni olish", fmt.Sprintf("take_%d", orderID))))
+	menu.Inline(menu.Row(
+		menu.Data("📥 Zakazni olish", fmt.Sprintf("take_%d", orderID)),
+		menu.Data("❌ Yopish", "close_msg"),
+	))
 
 	for id := range targetIDs {
 		var teleID int64
@@ -983,6 +1060,9 @@ func (b *Bot) generateCalendarWithPrefix(c tele.Context, year, month int, prefix
 	}
 
 	menu.Inline(rows...)
+	if c.Callback() != nil {
+		return c.Edit(header, menu)
+	}
 	return c.Send(header, menu)
 }
 
