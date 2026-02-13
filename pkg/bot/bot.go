@@ -91,34 +91,33 @@ func (b *Bot) handleTakeOrderWithID(c tele.Context, id int64) error {
 	// 1. Check if order is still active (not taken by someone else and approved)
 	order, _ := b.Stg.Order().GetByID(context.Background(), id)
 	if order == nil || order.Status != "active" {
-		return c.Send("❌ Kechirasiz, ushbu buyurtma allaqachon olingan yoki bekor qilingan.")
+		return c.Send("❌ Извините, этот заказ уже принят или отменен.")
 	}
 
-	// 2. Set status to 'wait_confirm' (Waiting for Admin approval of the match)
-	// We'll update the order status and assign the driver_id temporarily (or use a separate request table, but let's use order table for simplicity)
-	// We might need to store the candidate driver ID. Since we don't have a separate field, we can use `driver_id` but keep status non-final.
-	// Let's rely on `driver_id` being set but status being `wait_confirm`.
-	err := b.Stg.Order().TakeOrder(context.Background(), id, dbID) // Updates driver_id, status -> 'taken'. We need to override this behavior or update status manually after.
-	// Actually TakeOrder sets to taken. Let's start with that then update to wait_confirm immediately.
-	// Or better, do a custom query.
+	// 2. Atomically request the order (active -> wait_confirm + driver_id)
+	err := b.Stg.Order().RequestOrder(context.Background(), id, dbID)
 	if err != nil {
 		return c.Send("❌ Xatolik: " + err.Error())
 	}
-	// Revert status to 'wait_confirm'
-	b.DB.Exec(context.Background(), "UPDATE orders SET status='wait_confirm' WHERE id=$1", id)
 
 	c.Send("⏳ So'rovingiz adminga yuborildi. Admin tasdiqlashini kuting...")
 
 	// 3. Notify Admin
 	driver, _ := b.Stg.User().Get(context.Background(), dbID)
+	if driver == nil {
+		b.Log.Error("Driver not found for notification", logger.Int64("driver_id", dbID))
+		return c.Send("❌ Haydovchi ma'lumotlari topilmadi.")
+	}
 
-	msg := fmt.Sprintf("🔔 <b>HAYDOVCHI BUYURTMANI OLMOQCHI</b>\n\n🆔 Buyurtma: #%d\n🚖 Haydovchi: <a href=\"tg://user?id=%d\">%s</a>\n📞 Tel: %s",
-		id, driver.TelegramID, driver.FullName, *driver.Phone)
+	phone := "Noma'lum"
+	if driver.Phone != nil {
+		phone = *driver.Phone
+	}
+
+	msg := fmt.Sprintf("🔔 <b>ВОДИТЕЛЬ ХОЧЕТ ПРИНЯТЬ ЗАКАЗ</b>\n\n🆔 Заказ: #%d\n🚖 Водитель: <a href=\"tg://user?id=%d\">%s</a>\n📞 Тел: %s\n\n👤 Клиент: <a href=\"tg://user?id=%d\">%s</a>\n📞 Тел: %s",
+		id, driver.TelegramID, driver.FullName, phone, order.ClientID, order.ClientUsername, order.ClientPhone)
 
 	b.notifyAdmin(id, msg, "match") // "match" type allows us to send specific buttons
-
-	// 4. Notify Client (to keep them waiting)
-	b.notifyUser(order.ClientID, "🚕 Haydovchi topildi! Operator tekshirib tasdiqlashini kuting...")
 
 	return nil
 }
@@ -159,72 +158,135 @@ func (b *Bot) Start() {
 }
 
 var messages = map[string]map[string]string{
-	"uz": {
-		"welcome":       "👋 Assalomu alaykum! Tizimga xush kelibsiz.",
-		"contact_msg":   "Ro'yxatdan o'tish uchun telefon raqamingizni yuboring:",
-		"share_contact": "📱 Raqamni Ulashish",
-		"registered":    "🎉 Ro'yxatdan muvaffaqiyatli o'tdingiz!",
-		"blocked":       "🚫 Sizning hisobingiz bloklangan.",
-		"no_entry":      "🚫 Ushbu bot faqat haydovchilar va adminlar uchun.",
-		"menu_client":   "👤 Mijoz menyusi:",
-		"menu_driver":   "🚖 Haydovchi menyusi:",
-		"menu_admin":    "🛠 Admin paneli:",
-		"order_from":    "📍 Qayerdan olasiz? (Shahar/tuman nomi)",
-		"order_to":      "🏁 Qayerga borasiz? (Shahar/tuman nomi)",
-		"order_tariff":  "🚕 Tarifni tanlang:",
-		"order_pass":    "👥 Yo'lovchilar sonini kiriting:",
-		"order_time":    "📅 Ketish vaqti va sanasini kiriting (Masalan: Bugun 18:00):",
-		"order_confirm": "💰 Buyurtma tafsilotlari:\nNarx: %d %s\n\nTasdiqlaysizmi?",
-		"order_created": "✅ Buyurtmangiz qabul qilindi!",
-		"no_orders":     "📭 Hozircha faol buyurtmalar yo'q.",
-		"notif_new":     "🔔 YANGI ZAKAZ!\n🆔 #%d\n💰 Narx: %d %s\n📍 Yo'l: %s",
-		"notif_taken":   "🚖 Buyurtmangiz haydovchi tomonidan qabul qilindi!\n\n🆔 ID: #%d\n🚗 Haydovchi: %s\n📞 Tel: %s\n👤 Profil: %s",
-		"notif_done":    "🏁 Buyurtmangiz muvaffaqiyatli yakunlandi. Rahmat!",
-		"notif_cancel":  "⚠️ Buyurtma #%d bekor qilindi.",
+	"ru": {
+		"welcome":       "👋 Здравствуйте! Добро пожаловать в систему.",
+		"contact_msg":   "Для регистрации, пожалуйста, отправьте ваш номер телефона:",
+		"share_contact": "📱 Поделиться номером",
+		"registered":    "🎉 Вы успешно зарегистрированы!",
+		"blocked":       "🚫 Ваш аккаунт заблокирован.",
+		"no_entry":      "🚫 Этот бот только для водителей и админов.",
+		"menu_client":   "👤 Меню клиента:",
+		"menu_driver":   "🚖 Меню водителя:",
+		"menu_admin":    "🛠 Панель администратора:",
+		"order_from":    "📍 Откуда вас забрать? (Город/район)",
+		"order_to":      "🏁 Куда вы едете? (Город/район)",
+		"order_tariff":  "🚕 Выберите тариф:",
+		"order_pass":    "👥 Введите количество пассажиров:",
+		"order_time":    "📅 Введите дату и время (Например: Сегодня 18:00):",
+		"order_confirm": "💰 Детали заказа:\nЦена: %d %s\n\nПодтверждаете?",
+		"order_created": "✅ Ваш заказ принят!",
+		"no_orders":     "📭 На данный момент активных заказов нет.",
+		"notif_new":     "🔔 НОВЫЙ ЗАКАЗ!\n🆔 #%d\n💰 Цена: %s\n📍 Маршрут: %s",
+		"notif_taken":   "🚖 Ваш заказ принят водителем!\n\n🆔 ID: #%d\n🚗 Водитель: %s\n📞 Тел: %s\n👤 Профиль: %s",
+		"notif_done":    "🏁 Ваш заказ успешно завершен. Спасибо!",
+		"notif_cancel":  "⚠️ Заказ #%d отменен.",
+		"help_client":   "📖 <b>Помощь для клиентов:</b>\n\n➕ <b>Создать заказ</b> - Создание нового заказа. Выберите город, напишите пункт назначения и выберите тариф.\n📋 <b>Мои заказы</b> - Все ваши заказы и их статус.\n🏠 <b>Главное меню</b> - Вернуться на главную страницу.",
+		"help_driver":   "📖 <b>Помощь для водителей:</b>\n\n📦 <b>Активные заказы</b> - Список всех свободных заказов на данный момент.\n📍 <b>Мои маршруты</b> - Города, по которым вы работаете. Уведомления приходят только по этим маршрутам.\n🚕 <b>Мои тарифы</b> - Тарифы, по которым вы работаете (Эконом, Комфорт и т.д.).\n📅 <b>Поиск по дате</b> - Просмотр заказов на определенную дату.\n📋 <b>Мои заказы</b> - Заказы, которые вы приняли и выполняете.",
+		"help_admin":    "📖 <b>Помощь админ-панели:</b>\n\n👥 <b>Пользователи</b> - Управление пользователями (роли, блокировка).\n📦 <b>Все заказы</b> - История всех заказов в системе.\n⚙️ <b>Тарифы</b> - Добавление или удаление тарифов.\n🗺 <b>Города</b> - Редактирование списка городов.\n📊 <b>Статистика</b> - Общая статистика использования.",
 	},
 }
 
 func (b *Bot) registerHandlers() {
 	b.Bot.Handle("/start", b.handleStart)
+	b.Bot.Handle("/help", b.handleHelp)
 
 	// Client Handlers
 	if b.Type == BotTypeClient {
 		b.Bot.Handle(tele.OnContact, b.handleContact)
-		b.Bot.Handle("➕ Zakaz berish", b.handleOrderStart)
-		b.Bot.Handle("📋 Mening zakazlarim", b.handleMyOrders)
+		b.Bot.Handle("➕ Создать заказ", b.handleOrderStart)
+		b.Bot.Handle("📋 Мои заказы", b.handleMyOrders)
+		b.Bot.Handle("🏠 Главное меню", b.handleStart)
 	}
 
 	// Driver Handlers
 	if b.Type == BotTypeDriver {
 		b.Bot.Handle(tele.OnContact, b.handleContact)
-		b.Bot.Handle("📦 Faol zakazlar", b.handleActiveOrders)
-		b.Bot.Handle("📋 Mening zakazlarim", b.handleMyOrdersDriver)
-		b.Bot.Handle("📍 Yo'nalishlarim", b.handleDriverRoutes)
-		b.Bot.Handle("🚕 Tariflarim", b.handleDriverTariffs)
-		b.Bot.Handle("🔍 Sanadan qidirish", b.handleDriverCalendarSearch)
-		b.Bot.Handle("🏠 Asosiy menyu", b.handleStart)
+		b.Bot.Handle("📦 Активные заказы", b.handleActiveOrders)
+		b.Bot.Handle("📋 Мои заказы", b.handleMyOrdersDriver)
+		b.Bot.Handle("📍 Мои маршруты", b.handleDriverRoutes)
+		b.Bot.Handle("🚕 Мои тарифы", b.handleDriverTariffs)
+		b.Bot.Handle("Поиск по дате", b.handleDriverCalendarSearch)
+		b.Bot.Handle("🏠 Главное меню", b.handleStart)
 	}
 
 	// Admin Handlers
 	if b.Type == BotTypeAdmin {
 		b.Bot.Handle(tele.OnContact, b.handleContact)
-		b.Bot.Handle("👥 Userlar", b.handleAdminUsers)
-		b.Bot.Handle("📦 Jami zakazlar", b.handleAdminOrders)
-		b.Bot.Handle("⚙️ Tariflar", b.handleAdminTariffs)
-		b.Bot.Handle("🗺 Shaharlar", b.handleAdminLocations)
-		b.Bot.Handle("📊 Statistika", b.handleAdminStats)
-		b.Bot.Handle("➕ Tarif qo'shish", b.handleTariffAddStart)
-		b.Bot.Handle("➕ Shahar qo'shish", b.handleLocationAddStart)
-		b.Bot.Handle("🏠 Asosiy menyu", b.handleStart)
+		b.Bot.Handle("👥 Пользователи", b.handleAdminUsers)
+		b.Bot.Handle("📦 Все заказы", b.handleAdminOrders)
+		b.Bot.Handle("⚙️ Тарифы", b.handleAdminTariffs)
+		b.Bot.Handle("🗺 Города", b.handleAdminLocations)
+		b.Bot.Handle("📊 Статистика", b.handleAdminStats)
+		b.Bot.Handle("➕ Добавить тариф", b.handleTariffAddStart)
+		b.Bot.Handle("🗑 Удалить по ID", b.handleTariffDeleteStart)
+		b.Bot.Handle("➕ Добавить город", b.handleLocationAddStart)
+		b.Bot.Handle("🗑 Удалить по ID", b.handleLocationDeleteStart)
+		b.Bot.Handle("🔍 Получить по ID", b.handleLocationGetStart)
+		b.Bot.Handle("🏠 Главное меню", b.handleStart)
 	}
 
 	b.Bot.Handle(tele.OnCallback, b.handleCallback)
 	b.Bot.Handle(tele.OnText, b.handleText)
 	b.Bot.Handle(tele.OnWebApp, b.handleWebApp)
+
+	// Set Bot Commands for UI hint
+	cmds := []tele.Command{
+		{Text: "start", Description: "Запустить бота / Главное меню"},
+		{Text: "help", Description: "Помощь и руководство"},
+	}
+	b.Bot.SetCommands(cmds)
+}
+
+func (b *Bot) handleAdminLogin(c tele.Context) error {
+	session := b.Sessions[c.Sender().ID]
+	if session == nil {
+		b.Sessions[c.Sender().ID] = &UserSession{State: "awaiting_login"}
+		session = b.Sessions[c.Sender().ID]
+	}
+
+	if session.State == "awaiting_login" {
+		session.State = "awaiting_login_input"
+		session.LastActionTime = time.Now() // timeout ni oldini olish uchun
+		return c.Send("🔐 <b>Админ-система</b>\n\nВведите логин:", tele.ModeHTML)
+	}
+
+	if session.State == "awaiting_login_input" {
+		session.TempString = c.Text() // login ni saqlash uchun
+		session.State = "awaiting_password"
+		session.LastActionTime = time.Now() // timeout ni oldini olish uchun
+		return c.Send("🔑 Введите пароль:", tele.ModeHTML)
+	}
+
+	if session.State == "awaiting_password" {
+		login := session.TempString
+		password := c.Text()
+
+		if login == b.Cfg.AdminLogin && password == b.Cfg.AdminPassword {
+			session.State = "authenticated"
+			session.LastActionTime = time.Now() // timeout ni oldini olish uchun
+			return c.Send("✅ Успешный вход! Меню администратора:", tele.ModeHTML)
+		} else {
+			session.State = "awaiting_login"
+			session.TempString = ""
+			session.LastActionTime = time.Now()
+			return c.Send("❌ Логин или пароль неверны!\n\nПопробуйте еще раз:", tele.ModeHTML)
+		}
+	}
+
+	return nil
 }
 
 func (b *Bot) handleStart(c tele.Context) error {
 	b.Log.Info(fmt.Sprintf("Start command received from %d (%s)", c.Sender().ID, c.Sender().Username))
+
+	// Admin bot uchun login/parol tekshiruvi
+	if b.Type == BotTypeAdmin {
+		session := b.Sessions[c.Sender().ID]
+		if session == nil || session.State != "authenticated" {
+			return b.handleAdminLogin(c)
+		}
+	}
+
 	ctx := context.Background()
 	user, _ := b.Stg.User().GetOrCreate(ctx, c.Sender().ID, c.Sender().Username, fmt.Sprintf("%s %s", c.Sender().FirstName, c.Sender().LastName))
 
@@ -237,11 +299,11 @@ func (b *Bot) handleStart(c tele.Context) error {
 	}
 
 	if (b.Type == BotTypeDriver || b.Type == BotTypeAdmin) && !isAdmin && user.Role == "client" && user.Status != "pending" {
-		return c.Send("🚫 <b>Kirish taqiqlandi!</b>\n\nSiz mijoz sifatida ro'yxatdan o'tgansiz.\n\n👇 Iltimos, mijozlar botiga o'ting:\n@clienttaxigo_bot", tele.ModeHTML)
+		return c.Send("🚫 <b>Доступ запрещен!</b>\n\nВы зарегистрированы как клиент.\n\n👇 Пожалуйста, перейдите в бот для клиентов:\n@clienttaxigo_bot", tele.ModeHTML)
 	}
 
 	if b.Type == BotTypeClient && user.Role == "driver" {
-		return c.Send("🚫 <b>Kirish taqiqlandi!</b>\n\nSiz haydovchi sifatida ro'yxatdan o'tgansiz.\n\n👇 Iltimos, haydovchilar botiga o'ting:\n@drivertaxisgo_bot", tele.ModeHTML)
+		return c.Send("🚫 <b>Доступ запрещен!</b>\n\nВы зарегистрированы как водитель.\n\n👇 Пожалуйста, перейдите в бот для водителей:\n@drivertaxisgo_bot", tele.ModeHTML)
 	}
 
 	// Always initialize/reset session on /start
@@ -253,8 +315,8 @@ func (b *Bot) handleStart(c tele.Context) error {
 
 	if user.Status == "pending" {
 		menu := &tele.ReplyMarkup{ResizeKeyboard: true}
-		menu.Reply(menu.Row(menu.Contact(messages["uz"]["share_contact"])))
-		return c.Send(messages["uz"]["contact_msg"], menu)
+		menu.Reply(menu.Row(menu.Contact(messages["ru"]["share_contact"])))
+		return c.Send(messages["ru"]["contact_msg"], menu)
 	}
 
 	return b.showMenu(c, user)
@@ -263,7 +325,7 @@ func (b *Bot) handleStart(c tele.Context) error {
 func (b *Bot) handleContact(c tele.Context) error {
 	b.Log.Info(fmt.Sprintf("Contact received from %d", c.Sender().ID))
 	if c.Message().Contact.UserID != c.Sender().ID {
-		return c.Send("O'zingizni raqamingizni yuboring.")
+		return c.Send("Пожалуйста, отправьте свой собственный номер.")
 	}
 	ctx := context.Background()
 	b.Stg.User().UpdatePhone(ctx, c.Sender().ID, c.Message().Contact.PhoneNumber)
@@ -276,7 +338,7 @@ func (b *Bot) handleContact(c tele.Context) error {
 	b.Stg.User().UpdateStatus(ctx, c.Sender().ID, "active")
 	user, _ := b.Stg.User().Get(ctx, c.Sender().ID)
 
-	c.Send(messages["uz"]["registered"], tele.RemoveKeyboard)
+	c.Send(messages["ru"]["registered"], tele.RemoveKeyboard)
 
 	// If it's a driver bot and user is a driver (or just became one), start route setup
 	if b.Type == BotTypeDriver && user.Role == "driver" {
@@ -299,37 +361,58 @@ func (b *Bot) showMenu(c tele.Context, user *models.User) error {
 
 	if b.Type == BotTypeClient {
 		menu.Reply(
-			menu.Row(menu.Text("➕ Zakaz berish")),
-			menu.Row(menu.Text("📋 Mening zakazlarim")),
+			menu.Row(menu.Text("➕ Создать заказ")),
+			menu.Row(menu.Text("📋 Мои заказы")),
+			menu.Row(menu.Text("🏠 Главное меню")),
 		)
-		return c.Send(messages["uz"]["menu_client"], &tele.SendOptions{ReplyMarkup: menu})
+		return c.Send(messages["ru"]["menu_client"], &tele.SendOptions{ReplyMarkup: menu})
 	}
 
 	if user.Role == "admin" {
 		menu.Reply(
-			menu.Row(menu.Text("👥 Userlar"), menu.Text("📦 Jami zakazlar")),
-			menu.Row(menu.Text("⚙️ Tariflar"), menu.Text("🗺 Shaharlar")),
-			menu.Row(menu.Text("📊 Statistika")),
-			menu.Row(menu.Text("📦 Faol zakazlar"), menu.Text("📋 Mening zakazlarim")),
-			menu.Row(menu.Text("🏠 Asosiy menyu")),
+			menu.Row(menu.Text("👥 Пользователи"), menu.Text("📦 Все заказы")),
+			menu.Row(menu.Text("⚙️ Тарифы"), menu.Text("🗺 Города")),
+			menu.Row(menu.Text("📊 Статистика")),
+			menu.Row(menu.Text("📦 Активные заказы"), menu.Text("📋 Мои заказы")),
+			menu.Row(menu.Text("🏠 Главное меню")),
 		)
-		return c.Send(messages["uz"]["menu_admin"], &tele.SendOptions{ReplyMarkup: menu})
+		return c.Send(messages["ru"]["menu_admin"], &tele.SendOptions{ReplyMarkup: menu})
 	}
 
 	// Driver Menu
 	menu.Reply(
-		menu.Row(menu.Text("📦 Faol zakazlar")),
-		menu.Row(menu.Text("📍 Yo'nalishlarim"), menu.Text("🚕 Tariflarim")),
-		menu.Row(menu.Text("� Sanadan qidirish")),
-		menu.Row(menu.Text("�📋 Mening zakazlarim")),
+		menu.Row(menu.Text("📦 Активные заказы")),
+		menu.Row(menu.Text("📍 Мои маршруты"), menu.Text("🚕 Мои тарифы")),
+		menu.Row(menu.Text("Поиск по дате")),
+		menu.Row(menu.Text("📋 Мои заказы")),
 	)
-	return c.Send(messages["uz"]["menu_driver"], &tele.SendOptions{ReplyMarkup: menu})
+	return c.Send(messages["ru"]["menu_driver"], &tele.SendOptions{ReplyMarkup: menu})
+}
+
+func (b *Bot) handleHelp(c tele.Context) error {
+	user := b.getCurrentUser(c)
+	if user == nil {
+		return c.Send("📖 Для использования системы нажмите /start.")
+	}
+
+	msgKey := "help_client"
+	if user.Role == "admin" && b.Type == BotTypeAdmin {
+		msgKey = "help_admin"
+	} else if user.Role == "driver" || b.Type == BotTypeDriver {
+		msgKey = "help_driver"
+	}
+
+	return c.Send(messages["ru"][msgKey], tele.ModeHTML)
 }
 
 func (b *Bot) handleOrderStart(c tele.Context) error {
+	b.Log.Info("DEBUG: Handle Order Start", logger.Int64("user_id", c.Sender().ID))
 	session := b.Sessions[c.Sender().ID]
 	if session == nil {
 		user := b.getCurrentUser(c)
+		if user == nil {
+			return c.Send("❌ Ошибка: Информация о пользователе не найдена. Пожалуйста, нажмите /start еще раз.")
+		}
 		b.Sessions[c.Sender().ID] = &UserSession{DBID: user.ID, State: StateIdle}
 		session = b.Sessions[c.Sender().ID]
 
@@ -362,26 +445,26 @@ func (b *Bot) handleOrderStart(c tele.Context) error {
 	}
 
 	menu.Inline(rows...)
-	return c.Send(messages["uz"]["order_from"], menu, tele.ModeHTML)
+	return c.Send(messages["ru"]["order_from"], menu, tele.ModeHTML)
 }
 
 func (b *Bot) handleActiveOrders(c tele.Context) error {
 	orders, _ := b.Stg.Order().GetActiveOrders(context.Background())
 	if len(orders) == 0 {
-		return c.Send(messages["uz"]["no_orders"])
+		return c.Send(messages["ru"]["no_orders"])
 	}
 
 	for _, o := range orders {
-		timeStr := "Noma'lum"
+		timeStr := "Неизвестно"
 		if o.PickupTime != nil {
 			timeStr = o.PickupTime.Format("02.01.2006 15:04")
 		}
 
-		txt := fmt.Sprintf("📦 <b>YANGI ZAKAZ #%d</b>\n\n📍 Yo'nalish: <b>%s ➡️ %s</b>\n💰 Narx: <b>%d %s</b>\n👥 Yo'lovchilar: <b>%d</b>\n🕒 Vaqt: <b>%s</b>",
-			o.ID, o.FromLocationName, o.ToLocationName, o.Price, o.Currency, o.Passengers, timeStr)
+		txt := fmt.Sprintf("📦 <b>НОВЫЙ ЗАКАЗ #%d</b>\n\n📍 Маршрут: <b>%s ➡️ %s</b>\n💰 Цена: <b>%d %s</b>\n👥 Пассажиры: <b>%d</b>\n🕒 Время: <b>%s</b>\n\n👤 Клиент: <a href=\"tg://user?id=%d\">%s</a>\n📞 Тел: %s",
+			o.ID, o.FromLocationName, o.ToLocationName, o.Price, o.Currency, o.Passengers, timeStr, o.ClientID, o.ClientUsername, o.ClientPhone)
 
 		menu := &tele.ReplyMarkup{}
-		menu.Inline(menu.Row(menu.Data("📥 Zakazni olish", fmt.Sprintf("take_%d", o.ID))))
+		menu.Inline(menu.Row(menu.Data("📥 Принять заказ", fmt.Sprintf("take_%d", o.ID))))
 		c.Send(txt, menu, tele.ModeHTML)
 	}
 	return nil
@@ -397,21 +480,21 @@ func (b *Bot) handleMyOrdersDriver(c tele.Context) error {
 
 	orders, _ := b.Stg.Order().GetDriverOrders(context.Background(), session.DBID)
 	if len(orders) == 0 {
-		return c.Send("Sizda olingan zakazlar yo'q.")
+		return c.Send("У вас нет принятых заказов.")
 	}
 
 	for _, o := range orders {
-		timeStr := "Noma'lum"
+		timeStr := "Неизвестно"
 		if o.PickupTime != nil {
 			timeStr = o.PickupTime.Format("02.01.2006 15:04")
 		}
 
-		txt := fmt.Sprintf("🚖 <b>ZAKAZ #%d</b>\n📍 %s ➡️ %s\n👥 Yo'lovchilar: %d\n💰 Narx: %d %s\n📅 Vaqt: %s\n📊 Status: %s",
-			o.ID, o.FromLocationName, o.ToLocationName, o.Passengers, o.Price, o.Currency, timeStr, o.Status)
+		txt := fmt.Sprintf("🚖 <b>ЗАКАЗ #%d</b>\n📍 %s ➡️ %s\n👥 Пассажиры: %d\n💰 Цена: %d %s\n📅 Время: %s\n📊 Статус: %s\n\n👤 Клиент: <a href=\"tg://user?id=%d\">%s</a>\n📞 Тел: %s",
+			o.ID, o.FromLocationName, o.ToLocationName, o.Passengers, o.Price, o.Currency, timeStr, o.Status, o.ClientID, o.ClientUsername, o.ClientPhone)
 
 		menu := &tele.ReplyMarkup{}
 		if o.Status == "taken" {
-			menu.Inline(menu.Row(menu.Data("✅ Yakunlash", fmt.Sprintf("complete_%d", o.ID))))
+			menu.Inline(menu.Row(menu.Data("✅ Завершить", fmt.Sprintf("complete_%d", o.ID))))
 		}
 		c.Send(txt, menu, tele.ModeHTML)
 	}
@@ -441,40 +524,40 @@ func (b *Bot) showUsersPage(c tele.Context, page int) error {
 	}
 
 	if len(users) == 0 {
-		return c.Send("👥 Userlar topilmadi.")
+		return c.Send("👥 Пользователи не найдены.")
 	}
 
 	var msg strings.Builder
-	msg.WriteString(fmt.Sprintf("👥 <b>Userlar Ro'yxati (%d/%d):</b>\n\n", page+1, totalPages))
+	msg.WriteString(fmt.Sprintf("👥 <b>Список пользователей (%d/%d):</b>\n\n", page+1, totalPages))
 
 	menu := &tele.ReplyMarkup{}
 	var rows []tele.Row
 
 	for i := start; i < end; i++ {
 		u := users[i]
-		phone := "Noma'lum"
+		phone := "Неизвестно"
 		if u.Phone != nil {
 			phone = *u.Phone
 		}
 
-		msg.WriteString(fmt.Sprintf("🆔 <b>%d</b> | %s\n📞 %s | Role: <b>%s</b> | Status: <b>%s</b>\n", u.TelegramID, u.FullName, phone, u.Role, u.Status))
+		msg.WriteString(fmt.Sprintf("🆔 <b>%d</b> | %s\n📞 %s | Роль: <b>%s</b> | Статус: <b>%s</b>\n", u.TelegramID, u.FullName, phone, u.Role, u.Status))
 		msg.WriteString("------------------------------\n")
 
-		btnRole := menu.Data(fmt.Sprintf("� Role %d", u.ID), fmt.Sprintf("adm_role_%d_%d", u.TelegramID, page))
-		btnStatus := menu.Data(fmt.Sprintf("🚫/✅ %d", u.ID), fmt.Sprintf("adm_stat_%d_%d", u.TelegramID, page))
+		btnRole := menu.Data(fmt.Sprintf("🔄 Роль (%s)", u.FullName), fmt.Sprintf("adm_role_%d_%d", u.TelegramID, page))
+		btnStatus := menu.Data(fmt.Sprintf("🚫/✅ (%s)", u.FullName), fmt.Sprintf("adm_stat_%d_%d", u.TelegramID, page))
 		rows = append(rows, menu.Row(btnRole, btnStatus))
 	}
 
 	// Navigation
 	var navRow []tele.Btn
 	if page > 0 {
-		navRow = append(navRow, menu.Data("⬅️ Oldingi", fmt.Sprintf("users_page_%d", page-1)))
+		navRow = append(navRow, menu.Data("⬅️ Предыдущая", fmt.Sprintf("users_page_%d", page-1)))
 	}
 	if page < totalPages-1 {
-		navRow = append(navRow, menu.Data("Keyingi ➡️", fmt.Sprintf("users_page_%d", page+1)))
+		navRow = append(navRow, menu.Data("Следующая ➡️", fmt.Sprintf("users_page_%d", page+1)))
 	}
 	// Always add Back button
-	navRow = append(navRow, menu.Data("⬅️ Orqaga", "admin_back"))
+	navRow = append(navRow, menu.Data("⬅️ Назад", "admin_back"))
 
 	if len(navRow) > 0 {
 		rows = append(rows, menu.Row(navRow...))
@@ -517,11 +600,11 @@ func (b *Bot) showOrdersPage(c tele.Context, page int) error {
 	}
 
 	if len(orders) == 0 {
-		return c.Send("📦 Zakazlar topilmadi.")
+		return c.Send("📦 Заказы не найдены.")
 	}
 
 	var msg strings.Builder
-	msg.WriteString(fmt.Sprintf("📦 <b>Barcha Zakazlar (%d/%d):</b>\n\n", page+1, totalPages))
+	msg.WriteString(fmt.Sprintf("📦 <b>Все заказы (%d/%d):</b>\n\n", page+1, totalPages))
 
 	menu := &tele.ReplyMarkup{}
 	var rows []tele.Row
@@ -531,19 +614,19 @@ func (b *Bot) showOrdersPage(c tele.Context, page int) error {
 		msg.WriteString(fmt.Sprintf("🔹 <b>#%d</b> | %s\n📍 %s -> %s\n💰 %d %s\n\n", o.ID, o.Status, o.FromLocationName, o.ToLocationName, o.Price, o.Currency))
 
 		if o.Status != "completed" && o.Status != "cancelled" {
-			rows = append(rows, menu.Row(menu.Data(fmt.Sprintf("❌ Bekor qilish #%d", o.ID), fmt.Sprintf("adm_cancel_%d_%d", o.ID, page))))
+			rows = append(rows, menu.Row(menu.Data(fmt.Sprintf("❌ Отменить #%d", o.ID), fmt.Sprintf("adm_cancel_%d_%d", o.ID, page))))
 		}
 	}
 
 	var navRow []tele.Btn
 	if page > 0 {
-		navRow = append(navRow, menu.Data("⬅️ Oldingi", fmt.Sprintf("orders_page_%d", page-1)))
+		navRow = append(navRow, menu.Data("⬅️ Предыдущая", fmt.Sprintf("orders_page_%d", page-1)))
 	}
 	if page < totalPages-1 {
-		navRow = append(navRow, menu.Data("Keyingi ➡️", fmt.Sprintf("orders_page_%d", page+1)))
+		navRow = append(navRow, menu.Data("Следующая ➡️", fmt.Sprintf("orders_page_%d", page+1)))
 	}
 	// Always add Back button
-	navRow = append(navRow, menu.Data("⬅️ Orqaga", "admin_back"))
+	navRow = append(navRow, menu.Data("⬅️ Назад", "admin_back"))
 
 	if len(navRow) > 0 {
 		rows = append(rows, menu.Row(navRow...))
@@ -559,27 +642,88 @@ func (b *Bot) showOrdersPage(c tele.Context, page int) error {
 func (b *Bot) handleAdminTariffs(c tele.Context) error {
 	tariffs, _ := b.Stg.Tariff().GetAll(context.Background())
 	menu := &tele.ReplyMarkup{ResizeKeyboard: true}
-	menu.Reply(menu.Row(menu.Text("➕ Tarif qo'shish")), menu.Row(menu.Text("🏠 Asosiy menyu")))
+	menu.Reply(
+		menu.Row(menu.Text("➕ Добавить тариф"), menu.Text("🗑 Удалить по ID")),
+		menu.Row(menu.Text("🏠 Главное меню")),
+	)
 
 	var msg strings.Builder
-	msg.WriteString("⚙️ <b>Mavjud Tariflar:</b>\n\n")
+	msg.WriteString("⚙️ <b>Доступные тарифы:</b>\n\n")
 	for i, t := range tariffs {
-		msg.WriteString(fmt.Sprintf("%d. 🚕 <b>%s</b>\n", i+1, t.Name))
+		msg.WriteString(fmt.Sprintf("%d. 🚕 <b>%s</b> (ID: %d)\n", i+1, t.Name, t.ID))
 	}
 
 	return c.Send(msg.String(), menu, tele.ModeHTML)
 }
 
+func (b *Bot) handleTariffDeleteStart(c tele.Context) error {
+	session := b.Sessions[c.Sender().ID]
+	if session == nil {
+		user := b.getCurrentUser(c)
+		if user == nil {
+			return c.Send("❌ Ошибка: Информация о пользователе не найдена. Пожалуйста, нажмите /start еще раз.")
+		}
+		b.Sessions[c.Sender().ID] = &UserSession{DBID: user.ID, State: StateIdle}
+		session = b.Sessions[c.Sender().ID]
+	}
+
+	session.State = "awaiting_tariff_delete_id"
+
+	return c.Send("🗑 <b>Удаление тарифа</b>\n\nВведите ID тарифа, который хотите удалить:", tele.ModeHTML)
+}
+
+func (b *Bot) handleLocationDeleteStart(c tele.Context) error {
+	session := b.Sessions[c.Sender().ID]
+	if session == nil {
+		user := b.getCurrentUser(c)
+		if user == nil {
+			return c.Send("❌ Ошибка: Информация о пользователе не найдена. Пожалуйста, нажмите /start еще раз.")
+		}
+		b.Sessions[c.Sender().ID] = &UserSession{DBID: user.ID, State: StateIdle}
+		session = b.Sessions[c.Sender().ID]
+	}
+
+	session.State = "awaiting_location_delete_id"
+
+	return c.Send("🗑 <b>Удаление города</b>\n\nВведите ID города, который хотите удалить:", tele.ModeHTML)
+}
+
+func (b *Bot) handleLocationGetStart(c tele.Context) error {
+	session := b.Sessions[c.Sender().ID]
+	if session == nil {
+		user := b.getCurrentUser(c)
+		if user == nil {
+			return c.Send("❌ Ошибка: Информация о пользователе не найдена. Пожалуйста, нажмите /start еще раз.")
+		}
+		b.Sessions[c.Sender().ID] = &UserSession{DBID: user.ID, State: StateIdle}
+		session = b.Sessions[c.Sender().ID]
+	}
+
+	session.State = "awaiting_location_get_id"
+
+	return c.Send("🔍 <b>Получить город</b>\n\nВведите ID города для поиска:", tele.ModeHTML)
+}
+
 func (b *Bot) handleAdminLocations(c tele.Context) error {
 	locations, _ := b.Stg.Location().GetAll(context.Background())
 	menu := &tele.ReplyMarkup{ResizeKeyboard: true}
-	menu.Reply(menu.Row(menu.Text("➕ Shahar qo'shish")), menu.Row(menu.Text("🏠 Asosiy menyu")))
+	menu.Reply(
+		menu.Row(menu.Text("➕ Добавить город"), menu.Text("🗑 Удалить по ID")),
+		menu.Row(menu.Text("🔍 Получить по ID")),
+		menu.Row(menu.Text("🏠 Главное меню")),
+	)
 
 	var msg strings.Builder
-	msg.WriteString("🗺 <b>Mavjud Shaharlar:</b>\n\n")
-	for i, l := range locations {
-		msg.WriteString(fmt.Sprintf("%d. 📍 <b>%s</b>\n", i+1, l.Name))
+	msg.WriteString("🗺 <b>Доступные города:</b>\n\n")
+	msg.WriteString("┌─────┬──────────────────────┐\n")
+	msg.WriteString("│  ID │       Название       │\n")
+	msg.WriteString("├─────┼──────────────────────┤\n")
+
+	for _, l := range locations {
+		msg.WriteString(fmt.Sprintf("│ %4d │ %-20s │\n", l.ID, l.Name))
 	}
+
+	msg.WriteString("└─────┴──────────────────────┘\n")
 
 	return c.Send(msg.String(), menu, tele.ModeHTML)
 }
@@ -593,22 +737,57 @@ func (b *Bot) handleAdminStats(c tele.Context) error {
 			active++
 		}
 	}
-	return c.Send(fmt.Sprintf("📊 STATISTICS\n\nJami foydalanuvchilar: %d\nFaol zakazlar: %d\nJami zakazlar: %d", len(users), active, len(orders)))
+	return c.Send(fmt.Sprintf("📊 СТАТИСТИКА\n\nВсего пользователей: %d\nАктивные заказы: %d\nВсего заказов: %d", len(users), active, len(orders)))
 }
 
 func (b *Bot) handleText(c tele.Context) error {
+	b.Log.Info("Handle Text", logger.String("text", c.Text()))
+
 	session, ok := b.Sessions[c.Sender().ID]
 	if !ok || session.State == StateIdle {
 		return nil
 	}
 
-	b.Log.Info("Handle Text", logger.String("text", c.Text()), logger.String("state", session.State))
+	// Guard: If it's a menu button text, don't process it as input for states
+	txt := c.Text()
+	isMenu := txt == "➕ Создать заказ" || txt == "📋 Мои заказы" || txt == "🏠 Главное меню" ||
+		txt == "📦 Активные заказы" || txt == "📍 Мои маршруты" || txt == "🚕 Мои тарифы" ||
+		txt == "Поиск по дате" || txt == "👥 Пользователи" || txt == "📦 Все заказы" ||
+		txt == "⚙️ Тарифы" || txt == "🗺 Города" || txt == "📊 Статистика" ||
+		txt == "➕ Добавить тариф" || txt == "🗑 Удалить по ID" ||
+		txt == "➕ Добавить город" || txt == "🔍 Получить по ID"
+
+	if isMenu {
+		// If it's a menu button, we should probably reset state and let the specific handler take over
+		// But handlers for these are already registered, so we just return nil here to stop handleText
+		return nil
+	}
+
+	b.Log.Info("Processing Text State", logger.String("state", session.State))
+
+	// Admin login/parol uchun
+	if session.State == "awaiting_login" {
+		session.State = "awaiting_login_input"
+		session.LastActionTime = time.Now()
+		return c.Send("🔐 <b>Админ-система</b>\n\nВведите логин:", tele.ModeHTML)
+	}
+
+	if session.State == "awaiting_login_input" {
+		session.TempString = c.Text() // login ni saqlaymiz
+		session.State = "awaiting_password"
+		session.LastActionTime = time.Now()
+		return c.Send("🔑 Введите пароль:", tele.ModeHTML)
+	}
+
+	if session.State == "awaiting_password" {
+		return b.handleAdminLogin(c)
+	}
 
 	switch session.State {
 	case StateFrom:
 		session.TempString = c.Text()
 		session.State = StateTo
-		return c.Send(messages["uz"]["order_to"])
+		return c.Send(messages["ru"]["order_to"])
 	case StateTo:
 		session.TempString = session.TempString + " ➡️ " + c.Text()
 		session.State = StateTariff
@@ -627,7 +806,7 @@ func (b *Bot) handleText(c tele.Context) error {
 			rows = append(rows, menu.Row(currentRow...))
 		}
 		menu.Inline(rows...)
-		return c.Send(messages["uz"]["order_tariff"], menu)
+		return c.Send(messages["ru"]["order_tariff"], menu)
 	case StateTariffAdd:
 		b.Stg.Tariff().Create(context.Background(), c.Text())
 		session.State = StateIdle
@@ -636,23 +815,56 @@ func (b *Bot) handleText(c tele.Context) error {
 		b.Stg.Location().Create(context.Background(), c.Text())
 		session.State = StateIdle
 		return b.showMenu(c, b.getCurrentUser(c))
+	case "awaiting_tariff_delete_id":
+		id, err := strconv.ParseInt(c.Text(), 10, 64)
+		if err != nil {
+			return c.Send("❌ Неверный ID! Пожалуйста, введите число.")
+		}
+		err = b.Stg.Tariff().Delete(context.Background(), id)
+		if err != nil {
+			return c.Send("❌ Ошибка: " + err.Error())
+		}
+		session.State = StateIdle
+		return c.Send("✅ Тариф успешно удален!")
+	case "awaiting_location_delete_id":
+		id, err := strconv.ParseInt(c.Text(), 10, 64)
+		if err != nil {
+			return c.Send("❌ Неверный ID! Пожалуйста, введите число.")
+		}
+		err = b.Stg.Location().Delete(context.Background(), id)
+		if err != nil {
+			return c.Send("❌ Ошибка: " + err.Error())
+		}
+		session.State = StateIdle
+		return c.Send("✅ Город успешно удален!")
+	case "awaiting_location_get_id":
+		id, err := strconv.ParseInt(c.Text(), 10, 64)
+		if err != nil {
+			return c.Send("❌ Неверный ID! Пожалуйста, введите число.")
+		}
+		location, err := b.Stg.Location().GetByID(context.Background(), id)
+		if err != nil {
+			return c.Send("❌ Город не найден!")
+		}
+		session.State = StateIdle
+		return c.Send(fmt.Sprintf("🔍 <b>Информация о городе:</b>\n\n🆔 ID: %d\n📍 Название: %s", location.ID, location.Name), tele.ModeHTML)
 	case StateAdminLogin:
 		if c.Text() == "zarif" {
 			session.State = StateAdminPassword
-			return c.Send("🔑 Parolni kiriting:")
+			return c.Send("🔑 Введите пароль:")
 		} else {
-			return c.Send("❌ Login xato! Qaytadan kiriting:")
+			return c.Send("❌ Ошибка логина! Введите еще раз:")
 		}
 	case StateAdminPassword:
 		if c.Text() == "1234" {
 			// Success
 			b.Stg.User().UpdateRole(context.Background(), session.DBID, "admin")
 			session.State = StateIdle
-			user, _ := b.Stg.User().Get(context.Background(), session.DBID)
-			c.Send("✅ Muvaffaqiyatli kirdingiz!")
+			user, _ := b.Stg.User().Get(context.Background(), c.Sender().ID)
+			c.Send("✅ Успешный вход!")
 			return b.showMenu(c, user)
 		} else {
-			return c.Send("❌ Parol xato! Qaytadan kiriting:")
+			return c.Send("❌ Ошибка пароля! Введите еще раз:")
 		}
 	}
 	return nil
@@ -687,10 +899,18 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		strings.HasPrefix(data, "time_") ||
 		strings.HasPrefix(data, "confirm_")
 
+	b.Log.Info("DEBUG: Handle Callback",
+		logger.String("data", data),
+		logger.Bool("is_order_flow", isOrderFlowCallback),
+		logger.Int64("from_id", session.OrderData.FromLocationID),
+		logger.Int64("to_id", session.OrderData.ToLocationID),
+		logger.Int64("tariff_id", session.OrderData.TariffID),
+	)
+
 	if isOrderFlowCallback && session.OrderData.FromLocationID == 0 {
 
 		c.Delete() // Delete the stale message/keyboard
-		return c.Send("⚠️ <b>Sessiya yangilandi.</b>\n\nBot qayta ishga tushgani sababli, iltimos, buyurtmani boshqatdan shakllantiring:\n/start", tele.ModeHTML)
+		return c.Send("⚠️ <b>Сессия обновлена.</b>\n\nИз-за перезапуска бота, пожалуйста, оформите заказ заново:\n/start", tele.ModeHTML)
 	}
 
 	// Guard: Check for ToLocationID for steps that require it
@@ -700,7 +920,15 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		strings.HasPrefix(data, "confirm_")) && session.OrderData.ToLocationID == 0 {
 
 		c.Delete()
-		return c.Send("⚠️ <b>Sessiya yangilandi.</b>\n\nBot qayta ishga tushgani sababli, iltimos, buyurtmani boshqatdan shakllantiring:\n/start", tele.ModeHTML)
+		return c.Send("⚠️ <b>Сессия обновлена.</b>\n\nИз-за перезапуска бота, пожалуйста, оформите заказ заново:\n/start", tele.ModeHTML)
+	}
+
+	// Guard: Check for TariffID for steps that require it
+	if (strings.HasPrefix(data, "cal_") ||
+		strings.HasPrefix(data, "time_") ||
+		strings.HasPrefix(data, "confirm_")) && session.OrderData.TariffID == 0 {
+		c.Delete()
+		return c.Send("⚠️ <b>Сессия обновлена.</b>\n\nИз-за перезапуска бота, пожалуйста, оформите заказ заново:\n/start", tele.ModeHTML)
 	}
 
 	if strings.HasPrefix(data, "cl_f_") {
@@ -728,7 +956,7 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		}
 		menu.Inline(rows...)
 		c.Respond(&tele.CallbackResponse{})
-		return c.Edit(messages["uz"]["order_to"], menu, tele.ModeHTML)
+		return c.Edit(messages["ru"]["order_to"], menu, tele.ModeHTML)
 	}
 
 	if strings.HasPrefix(data, "cl_t_") {
@@ -756,17 +984,17 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		from, _ := b.Stg.Location().GetByID(context.Background(), session.OrderData.FromLocationID)
 		to, _ := b.Stg.Location().GetByID(context.Background(), session.OrderData.ToLocationID)
 
-		fromName := "Noma'lum"
+		fromName := "Неизвестно"
 		if from != nil {
 			fromName = from.Name
 		}
-		toName := "Noma'lum"
+		toName := "Неизвестно"
 		if to != nil {
 			toName = to.Name
 		}
 
 		session.TempString = fmt.Sprintf("%s ➡️ %s", fromName, toName)
-		return c.Edit(messages["uz"]["order_tariff"], menu)
+		return c.Edit(messages["ru"]["order_tariff"], menu)
 	}
 
 	if strings.HasPrefix(data, "tf_") {
@@ -828,22 +1056,22 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		}
 		menu.Inline(rows...)
 		c.Respond(&tele.CallbackResponse{})
-		return c.Edit("� Soatni tanlang:", menu)
+		return c.Edit("🕒 Выберите время:", menu)
 	}
 
 	if strings.HasPrefix(data, "take_") {
 		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "take_"), 10, 64)
-		b.Bot.Edit(c.Callback().Message, "✅ Buyurtma qabul qilindi!")
+		b.Bot.Edit(c.Callback().Message, "✅ Заказ принят!")
 		return b.handleTakeOrderWithID(c, id)
 	}
 
 	if strings.HasPrefix(data, "complete_") {
 		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "complete_"), 10, 64)
 		b.Stg.Order().CompleteOrder(context.Background(), id)
-		b.Bot.Edit(c.Callback().Message, "🏁 Buyurtma yakunlandi!")
+		b.Bot.Edit(c.Callback().Message, "🏁 Заказ завершен!")
 		order, _ := b.Stg.Order().GetByID(context.Background(), id)
 		if order != nil {
-			b.notifyUser(order.ClientID, messages["uz"]["notif_done"])
+			b.notifyUser(order.ClientID, messages["ru"]["notif_done"])
 		}
 		return c.Respond()
 	}
@@ -851,7 +1079,7 @@ func (b *Bot) handleCallback(c tele.Context) error {
 	if strings.HasPrefix(data, "cancel_") {
 		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "cancel_"), 10, 64)
 		b.Stg.Order().CancelOrder(context.Background(), id)
-		b.Bot.Edit(c.Callback().Message, "❌ Bekor qilindi.")
+		b.Bot.Edit(c.Callback().Message, "❌ Отменено.")
 		return c.Respond()
 	}
 
@@ -920,7 +1148,7 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		}
 		menu.Inline(rows...)
 		c.Respond(&tele.CallbackResponse{})
-		return c.Edit("<b>🏁 Qayerga borasiz?</b>\nShaharni tanlang:", menu, tele.ModeHTML)
+		return c.Edit("<b>🏁 Куда вы едете?</b>\nВыберите город:", tele.ModeHTML)
 	}
 
 	if strings.HasPrefix(data, "dr_t_") {
@@ -928,82 +1156,99 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		fromID := session.OrderData.FromLocationID
 
 		b.Stg.Route().AddRoute(context.Background(), session.DBID, fromID, toID)
-		c.Respond(&tele.CallbackResponse{Text: "Yo'nalish qo'shildi!"})
+		c.Respond(&tele.CallbackResponse{Text: "Маршрут добавлен!"})
 		return b.handleDriverRoutes(c)
 	}
 
 	if strings.HasPrefix(data, "tgl_") {
 		tariffID, _ := strconv.ParseInt(strings.TrimPrefix(data, "tgl_"), 10, 64)
 		b.Stg.Tariff().Toggle(context.Background(), session.DBID, tariffID)
+		return b.showDriverTariffs(c, false)
+	}
 
-		// Refresh the tariff list
-		tariffs, _ := b.Stg.Tariff().GetAll(context.Background())
-		enabled, _ := b.Stg.Tariff().GetEnabled(context.Background(), session.DBID)
+	if data == "tf_del_mode" {
+		return b.showDriverTariffs(c, true)
+	}
 
-		menu := &tele.ReplyMarkup{}
-		var rows []tele.Row
-		var currentRow []tele.Btn
-		for i, t := range tariffs {
-			icon := "🔴"
-			if enabled[t.ID] {
-				icon = "✅"
-			}
-			currentRow = append(currentRow, menu.Data(fmt.Sprintf("%s %s", icon, t.Name), fmt.Sprintf("tgl_%d", t.ID)))
-			if (i+1)%2 == 0 {
-				rows = append(rows, menu.Row(currentRow...))
-				currentRow = []tele.Btn{}
-			}
-		}
-		if len(currentRow) > 0 {
-			rows = append(rows, menu.Row(currentRow...))
-		}
-		menu.Inline(rows...)
-		return c.Edit("<b>🚕 Tariflarim</b>\n\nQaysi tariflardan buyurtma olmoqchisiz? Tanlang:", menu, tele.ModeHTML)
+	if data == "tf_back" {
+		return b.showDriverTariffs(c, false)
+	}
+
+	if strings.HasPrefix(data, "del_tf_") {
+		tariffID, _ := strconv.ParseInt(strings.TrimPrefix(data, "del_tf_"), 10, 64)
+		b.Stg.Tariff().Delete(context.Background(), tariffID)
+		return b.showDriverTariffs(c, true)
 	}
 
 	switch data {
 	case "confirm_yes":
-		if session.OrderData == nil || session.OrderData.FromLocationID == 0 || session.OrderData.ToLocationID == 0 {
+		if session.OrderData == nil || session.OrderData.FromLocationID == 0 || session.OrderData.ToLocationID == 0 || session.OrderData.TariffID == 0 {
 			b.Log.Warning("Invalid order data in session for confirm_yes", logger.Int64("user_id", c.Sender().ID))
-			return c.Send("⚠️ <b>Xatolik:</b> Buyurtma ma'lumotlari topilmadi. Iltimos, /start bosib buyurtmani qaytadan shakllantiring.", tele.ModeHTML)
+			return c.Send("⚠️ <b>Ошибка:</b> Данные заказа не найдены. Пожалуйста, нажмите /start и оформите заказ заново.", tele.ModeHTML)
 		}
-		session.OrderData.Status = "active"
+
+		// Get client info for order
+		client, _ := b.Stg.User().GetByID(context.Background(), session.DBID)
+		if client != nil {
+			if client.Username != "" {
+				session.OrderData.ClientUsername = client.Username
+			} else {
+				session.OrderData.ClientUsername = "Неизвестно"
+			}
+			if client.Phone != nil {
+				session.OrderData.ClientPhone = *client.Phone
+			} else {
+				session.OrderData.ClientPhone = "Неизвестно"
+			}
+		} else {
+			session.OrderData.ClientUsername = "Неизвестно"
+			session.OrderData.ClientPhone = "Неизвестно"
+		}
+
+		session.OrderData.Status = "pending"
 		order, err := b.Stg.Order().Create(context.Background(), session.OrderData)
 		if err == nil {
-			c.Send(messages["uz"]["order_created"])
+			c.Send(messages["ru"]["order_created"])
 			// New Flow: Notify Admin for approval
-			adminMsg := fmt.Sprintf("🔔 <b>YANGI BUYURTMA (Tasdiqlash uchun)</b>\n\n🆔 #%d\n📍 %s ➡️ %s\n💰 %d %s\n👥 %d yo'lovchi\n📅 %s",
+			adminMsg := fmt.Sprintf("🔔 <b>НОВЫЙ ЗАКАЗ (На утверждение)</b>\n\n🆔 #%d\n📍 %s ➡️ %s\n💰 %d %s\n👥 %d пассажиров\n📅 %s",
 				order.ID, session.TempString, c.Text(), order.Price, order.Currency, order.Passengers, session.TempString)
 			// Note: TempString might be overwritten or not perfect, ideally reconstruct from IDs.
 			// Reconstructing strictly for Admin message:
 			from, _ := b.Stg.Location().GetByID(context.Background(), session.OrderData.FromLocationID)
 			to, _ := b.Stg.Location().GetByID(context.Background(), session.OrderData.ToLocationID)
-			fromName, toName := "Noma'lum", "Noma'lum"
+			fromName, toName := "Неизвестно", "Неизвестно"
 			if from != nil {
 				fromName = from.Name
 			}
 			if to != nil {
 				toName = to.Name
 			}
-			timeStr := "Hozir"
+			timeStr := "Сейчас"
 			if session.OrderData.PickupTime != nil {
 				timeStr = session.OrderData.PickupTime.Format("02.01.2006 15:04")
 			}
 
-			adminMsg = fmt.Sprintf("🔔 <b>YANGI BUYURTMA (Tasdiqlash uchun)</b>\n\n🆔 #%d\n📍 %s ➡️ %s\n💰 Narx: %d %s\n👥 Yo'lovchilar: %d\n📅 Vaqt: %s",
-				order.ID, fromName, toName, order.Price, order.Currency, order.Passengers, timeStr)
+			clientName := "Неизвестно"
+			clientTeleID := int64(0)
+			if client != nil {
+				clientName = client.FullName
+				clientTeleID = client.TelegramID
+			}
+
+			adminMsg = fmt.Sprintf("🔔 <b>НОВЫЙ ЗАКАЗ (На утверждение)</b>\n\n🆔 #%d\n📍 %s ➡️ %s\n💰 Цена: %d %s\n👥 Пассажиры: %d\n📅 Время: %s\n\n👤 Клиент: <a href=\"tg://user?id=%d\">%s</a>\n📞 Тел: %s",
+				order.ID, fromName, toName, order.Price, order.Currency, order.Passengers, timeStr, clientTeleID, clientName, order.ClientPhone)
 
 			b.notifyAdmin(order.ID, adminMsg)
-			c.Send("⏳ Buyurtmangiz adminga yuborildi. Tasdiqlanishini kuting.")
+			c.Send("⏳ Ваш заказ отправлен администратору. Ожидайте подтверждения.")
 		} else {
 			b.Log.Error("Order creation failed", logger.Error(err))
-			c.Send("❌ Buyurtma yaratishda xatolik yuz berdi.")
+			c.Send("❌ Произошла ошибка при создании заказа.")
 		}
 		session.State = StateIdle
 		return b.showMenu(c, b.getCurrentUser(c))
 	case "confirm_no":
 		session.State = StateIdle
-		c.Send("❌ Bekor qilindi.")
+		c.Send("❌ Отменено.")
 		return b.showMenu(c, b.getCurrentUser(c))
 	}
 
@@ -1015,7 +1260,7 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		timeStr := strings.TrimPrefix(data, "time_") // "14:00"
 		if session.TempString == "" {
 			c.Delete()
-			return c.Send("⚠️ <b>Xatolik:</b> Sana tanlanmagan. Iltimos, /start bosib buyurtmani qaytadan shakllantiring.", tele.ModeHTML)
+			return c.Send("⚠️ <b>Ошибка:</b> Дата не выбрана. Пожалуйста, нажмите /start и оформите заказ заново.", tele.ModeHTML)
 		}
 
 		fullTimeStr := fmt.Sprintf("%s %s", session.TempString, timeStr) // "2023-10-27 14:00"
@@ -1024,7 +1269,7 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		if err != nil {
 			b.Log.Error("Failed to parse time", logger.Error(err), logger.String("fullTimeStr", fullTimeStr))
 			c.Delete()
-			return c.Send("⚠️ <b>Xatolik:</b> Vaqt formati noto'g'ri. Iltimos, /start bosib buyurtmani qaytadan shakllantiring.", tele.ModeHTML)
+			return c.Send("⚠️ <b>Ошибка:</b> Неверный формат времени. Пожалуйста, нажмите /start и оформите заказ заново.", tele.ModeHTML)
 		}
 
 		// Convert to UTC for storage
@@ -1041,26 +1286,26 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		to, _ := b.Stg.Location().GetByID(context.Background(), session.OrderData.ToLocationID)
 		tariff, _ := b.Stg.Tariff().GetByID(context.Background(), session.OrderData.TariffID)
 
-		fromName := "Noma'lum"
+		fromName := "Неизвестно"
 		if from != nil {
 			fromName = from.Name
 		}
-		toName := "Noma'lum"
+		toName := "Неизвестно"
 		if to != nil {
 			toName = to.Name
 		}
-		tariffName := "Noma'lum"
+		tariffName := "Неизвестно"
 		if tariff != nil {
 			tariffName = tariff.Name
 		}
 
-		msg := fmt.Sprintf("<b>💰 Buyurtmani tasdiqlash</b>\n\n📍 <b>%s ➡️ %s</b>\n🚕 Tarif: <b>%s</b>\n👥 Yo'lovchilar: <b>%d</b>\n📅 Vaqt: <b>%s</b>\n\nTasdiqlaysizmi?",
+		msg := fmt.Sprintf("<b>💰 Подтверждение заказа</b>\n\n📍 <b>%s ➡️ %s</b>\n🚕 Тариф: <b>%s</b>\n👥 Пассажиры: <b>%d</b>\n📅 Время: <b>%s</b>\n\nПодтверждаете?",
 			fromName, toName, tariffName, session.OrderData.Passengers, parsedTime.Format("02.01.2006 15:04"))
 
 		menu := &tele.ReplyMarkup{}
 		menu.Inline(menu.Row(
-			menu.Data("✅ Tasdiqlash", "confirm_yes"),
-			menu.Data("❌ Bekor qilish", "confirm_no"),
+			menu.Data("✅ Подтвердить", "confirm_yes"),
+			menu.Data("❌ Отменить", "confirm_no"),
 		))
 		c.Respond(&tele.CallbackResponse{})
 		return c.Edit(msg, menu, tele.ModeHTML)
@@ -1082,12 +1327,12 @@ func (b *Bot) handleAdminCallbacks(c tele.Context, data string) error {
 	if strings.HasPrefix(data, "user_blk_") {
 		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "user_blk_"), 10, 64)
 		b.Stg.User().UpdateStatus(context.Background(), id, "blocked")
-		return c.Respond(&tele.CallbackResponse{Text: "Bloklandi"})
+		return c.Respond(&tele.CallbackResponse{Text: "Заблокировано"})
 	}
 	if strings.HasPrefix(data, "user_act_") {
 		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "user_act_"), 10, 64)
 		b.Stg.User().UpdateStatus(context.Background(), id, "active")
-		return c.Respond(&tele.CallbackResponse{Text: "Aktiv qilindi"})
+		return c.Respond(&tele.CallbackResponse{Text: "Активировано"})
 	}
 
 	// Pagination Handlers
@@ -1156,15 +1401,27 @@ func (b *Bot) handleAdminCallbacks(c tele.Context, data string) error {
 			if err == nil {
 				// Re-fetch to get updated status or just use data knowing it is active
 				// Notify Drivers
-				b.notifyDrivers(order.ID, order.FromLocationID, order.ToLocationID, order.TariffID,
-					fmt.Sprintf(messages["uz"]["notif_new"], order.ID, order.Price, order.Currency, "")) // We don't have temp string here easily, maybe fetch route names or leave empty/generic
+				from, _ := b.Stg.Location().GetByID(context.Background(), order.FromLocationID)
+				to, _ := b.Stg.Location().GetByID(context.Background(), order.ToLocationID)
+				fromName, toName := "Неизвестно", "Неизвестно"
+				if from != nil {
+					fromName = from.Name
+				}
+				if to != nil {
+					toName = to.Name
+				}
+				priceStr := fmt.Sprintf("%d %s", order.Price, order.Currency)
+
+				notifMsg := fmt.Sprintf(messages["ru"]["notif_new"], order.ID, priceStr, fromName, toName)
+
+				b.notifyDrivers(order.ID, order.FromLocationID, order.ToLocationID, order.TariffID, notifMsg)
 
 				// Notify Client
-				b.notifyUser(order.ClientID, "✅ Buyurtmangiz admin tomonidan tasdiqlandi! Haydovchi qidirilmoqda...")
-				return c.Edit("✅ Tasdiqlandi va haydovchilarga yuborildi.")
+				b.notifyUser(order.ClientID, "✅ Ваш заказ подтвержден администратором! Ищем водителя...")
+				return c.Edit("✅ Подтверждено и отправлено водителям.")
 			}
 		}
-		return c.Edit("❌ Xatolik yuz berdi.")
+		return c.Edit("❌ Произошла ошибка.")
 	}
 
 	if strings.HasPrefix(data, "reject_") {
@@ -1172,53 +1429,79 @@ func (b *Bot) handleAdminCallbacks(c tele.Context, data string) error {
 		b.Stg.Order().CancelOrder(context.Background(), id)
 		order, _ := b.Stg.Order().GetByID(context.Background(), id)
 		if order != nil {
-			b.notifyUser(order.ClientID, "❌ Buyurtmangiz admin tomonidan bekor qilindi.")
+			b.notifyUser(order.ClientID, "❌ Ваш заказ отменен администратором.")
 		}
-		return c.Edit("❌ Bekor qilindi.")
+		return c.Edit("❌ Отклонено.")
 	}
 
 	// Match Approval (Driver <-> Client)
 	if strings.HasPrefix(data, "approve_match_") {
 		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "approve_match_"), 10, 64)
 
-		// 1. Finalize Order
-		b.DB.Exec(context.Background(), "UPDATE orders SET status='taken' WHERE id=$1", id)
-
 		order, _ := b.Stg.Order().GetByID(context.Background(), id)
 		if order == nil {
-			return c.Edit("❌ Buyurtma topilmadi.")
+			return c.Edit("❌ Заказ не найден.")
+		}
+		if order.Status != "wait_confirm" || order.DriverID == nil {
+			return c.Edit("❌ Этот заказ не находится в статусе ожидания подтверждения.")
+		}
+
+		// 1. Finalize Order (wait_confirm -> taken)
+		if _, err := b.DB.Exec(context.Background(), "UPDATE orders SET status='taken' WHERE id=$1 AND status='wait_confirm'", id); err != nil {
+			return c.Edit("❌ Произошла ошибка.")
 		}
 
 		// 2. Notify Client (with Driver details)
-		driver, _ := b.Stg.User().Get(context.Background(), *order.DriverID)
+		driver, _ := b.Stg.User().GetByID(context.Background(), *order.DriverID)
+		phone := "Неизвестно"
 		if driver != nil {
-			phone := "Noma'lum"
 			if driver.Phone != nil {
 				phone = *driver.Phone
 			}
 			profile := fmt.Sprintf("<a href=\"tg://user?id=%d\">%s</a>", driver.TelegramID, driver.FullName)
-			msg := fmt.Sprintf(messages["uz"]["notif_taken"], id, driver.FullName, phone, profile)
+			msg := fmt.Sprintf(messages["ru"]["notif_taken"], id, driver.FullName, phone, profile)
 			b.notifyUser(order.ClientID, msg)
 		}
 
 		// 3. Notify Driver
-		b.notifyDriverSpecific(*order.DriverID, fmt.Sprintf("✅ Admin buyurtmani tasdiqladi! (#%d)\nMijoz bilan bog'laning.", id))
+		client, _ := b.Stg.User().GetByID(context.Background(), order.ClientID)
+		clientInfo := "Данные клиента недоступны"
+		if client != nil {
+			clientPhone := "Неизвестно"
+			if client.Phone != nil {
+				clientPhone = *client.Phone
+			}
+			clientInfo = fmt.Sprintf("👤 Клиент: <a href=\"tg://user?id=%d\">%s</a>\n📞 Тел: %s", client.TelegramID, client.FullName, clientPhone)
+		}
+		b.notifyDriverSpecific(*order.DriverID, fmt.Sprintf("✅ Админ подтвердил заказ! (#%d)\n\n%s\n\nСвяжитесь с клиентом.", id, clientInfo))
 
-		return c.Edit("✅ Muvaffaqiyatli biriktirildi.")
+		return c.Edit("✅ Успешно прикреплено.")
 	}
 
 	if strings.HasPrefix(data, "reject_match_") {
 		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "reject_match_"), 10, 64)
 
-		// 1. Reset Status to Active
-		b.DB.Exec(context.Background(), "UPDATE orders SET status='active', driver_id=NULL WHERE id=$1", id)
+		order, _ := b.Stg.Order().GetByID(context.Background(), id)
+		if order == nil {
+			return c.Edit("❌ Заказ не найден.")
+		}
+		var requestedDriverID *int64
+		if order.DriverID != nil {
+			tmp := *order.DriverID
+			requestedDriverID = &tmp
+		}
 
-		// 2. Notify Driver
-		// We need to know who was the driver. We can find out from order before updating, or pass in callback.
-		// Simply notifying generally or letting it be is okay, but ideally notify the rejected driver.
-		// For simplicity, just reset.
+		// 1. Reset Status to Active only if still waiting confirm
+		if _, err := b.DB.Exec(context.Background(), "UPDATE orders SET status='active', driver_id=NULL WHERE id=$1 AND status='wait_confirm'", id); err != nil {
+			return c.Edit("❌ Произошла ошибка.")
+		}
 
-		return c.Edit("❌ Rad etildi. Buyurtma qayta aktivlashtirildi.")
+		// 2. Notify rejected driver
+		if requestedDriverID != nil {
+			b.notifyDriverSpecific(*requestedDriverID, fmt.Sprintf("❌ Админ отклонил ваш запрос на заказ. (#%d)", id))
+		}
+
+		return c.Edit("❌ Отклонено. Заказ снова активирован.")
 	}
 
 	return nil
@@ -1273,13 +1556,13 @@ func (b *Bot) notifyAdmin(orderID int64, text string, msgType ...string) {
 
 	if len(msgType) > 0 && msgType[0] == "match" {
 		menu.Inline(menu.Row(
-			menu.Data("✅ Tasdiqlash", fmt.Sprintf("approve_match_%d", orderID)),
-			menu.Data("❌ Rad etish", fmt.Sprintf("reject_match_%d", orderID)),
+			menu.Data("✅ Подтвердить", fmt.Sprintf("approve_match_%d", orderID)),
+			menu.Data("❌ Отклонить", fmt.Sprintf("reject_match_%d", orderID)),
 		))
 	} else {
 		menu.Inline(menu.Row(
-			menu.Data("✅ Tasdiqlash", fmt.Sprintf("approve_%d", orderID)),
-			menu.Data("❌ Bekor qilish", fmt.Sprintf("reject_%d", orderID)),
+			menu.Data("✅ Подтвердить", fmt.Sprintf("approve_%d", orderID)),
+			menu.Data("❌ Отменить", fmt.Sprintf("reject_%d", orderID)),
 		))
 	}
 
@@ -1343,8 +1626,8 @@ func (b *Bot) notifyDrivers(orderID, fromID, toID, tariffID int64, text string) 
 
 	menu := &tele.ReplyMarkup{}
 	menu.Inline(menu.Row(
-		menu.Data("📥 Zakazni olish", fmt.Sprintf("take_%d", orderID)),
-		menu.Data("❌ Yopish", "close_msg"),
+		menu.Data("📥 Принять заказ", fmt.Sprintf("take_%d", orderID)),
+		menu.Data("❌ Закрыть", "close_msg"),
 	))
 
 	for id := range targetIDs {
@@ -1366,20 +1649,20 @@ func (b *Bot) handleMyOrders(c tele.Context) error {
 
 	orders, _ := b.Stg.Order().GetClientOrders(context.Background(), session.DBID)
 	if len(orders) == 0 {
-		return c.Send("Sizda zakazlar yo'q.")
+		return c.Send("У вас нет заказов.")
 	}
 	for _, o := range orders {
-		timeStr := "Noma'lum"
+		timeStr := "Неизвестно"
 		if o.PickupTime != nil {
 			timeStr = o.PickupTime.Format("02.01.2006 15:04")
 		}
 
-		txt := fmt.Sprintf("📦 <b>Zakaz #%d</b>\n📍 %s ➡️ %s\n👥 Yo'lovchilar: %d\n📅 Vaqt: %s\n📊 Status: %s",
+		txt := fmt.Sprintf("📦 <b>Заказ #%d</b>\n📍 %s ➡️ %s\n👥 Пассажиры: %d\n📅 Время: %s\n📊 Статус: %s",
 			o.ID, o.FromLocationName, o.ToLocationName, o.Passengers, timeStr, o.Status)
 
 		menu := &tele.ReplyMarkup{}
-		if o.Status == "active" {
-			menu.Inline(menu.Row(menu.Data("❌ Bekor qilish", fmt.Sprintf("cancel_%d", o.ID))))
+		if o.Status == "active" || o.Status == "pending" {
+			menu.Inline(menu.Row(menu.Data("❌ Отменить", fmt.Sprintf("cancel_%d", o.ID))))
 		}
 		c.Send(txt, menu, tele.ModeHTML)
 	}
@@ -1388,12 +1671,12 @@ func (b *Bot) handleMyOrders(c tele.Context) error {
 
 func (b *Bot) handleTariffAddStart(c tele.Context) error {
 	b.Sessions[c.Sender().ID].State = StateTariffAdd
-	return c.Send("Tarif nomini yozing:")
+	return c.Send("Введите название тарифа:")
 }
 
 func (b *Bot) handleLocationAddStart(c tele.Context) error {
 	b.Sessions[c.Sender().ID].State = StateLocationAdd
-	return c.Send("Shahar/Tuman nomini yozing:")
+	return c.Send("Введите название города/района:")
 }
 
 func (b *Bot) generateCalendar(c tele.Context, year, month int) error {
@@ -1401,9 +1684,9 @@ func (b *Bot) generateCalendar(c tele.Context, year, month int) error {
 }
 
 func (b *Bot) generateCalendarWithPrefix(c tele.Context, year, month int, prefix string) error {
-	// Month names in Uzbek
-	monthNames := []string{"", "Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun",
-		"Iyul", "Avgust", "Sentabr", "Oktabr", "Noyabr", "Dekabr"}
+	// Month names in Russian
+	monthNames := []string{"", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+		"Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"}
 
 	firstDay := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
 	lastDay := firstDay.AddDate(0, 1, -1)
@@ -1416,8 +1699,8 @@ func (b *Bot) generateCalendarWithPrefix(c tele.Context, year, month int, prefix
 
 	// Week day names
 	rows = append(rows, menu.Row(
-		menu.Data("Du", "ignore"), menu.Data("Se", "ignore"), menu.Data("Ch", "ignore"),
-		menu.Data("Pa", "ignore"), menu.Data("Ju", "ignore"), menu.Data("Sh", "ignore"), menu.Data("Ya", "ignore"),
+		menu.Data("Пн", "ignore"), menu.Data("Вт", "ignore"), menu.Data("Ср", "ignore"),
+		menu.Data("Чт", "ignore"), menu.Data("Пт", "ignore"), menu.Data("Сб", "ignore"), menu.Data("Вс", "ignore"),
 	))
 
 	// Get first day of week (0 = Sunday, 1 = Monday, etc.)
@@ -1518,6 +1801,10 @@ func (b *Bot) getCurrentUser(c tele.Context) *models.User {
 	}
 	// If user not found, create (recover from DB wipe or new joiner clicking old button)
 	sender := c.Sender()
-	u, _ = b.Stg.User().GetOrCreate(context.Background(), sender.ID, sender.Username, fmt.Sprintf("%s %s", sender.FirstName, sender.LastName))
+	u, err = b.Stg.User().GetOrCreate(context.Background(), sender.ID, sender.Username, fmt.Sprintf("%s %s", sender.FirstName, sender.LastName))
+	if err != nil {
+		b.Log.Error("Failed to get or create user", logger.Error(err))
+		return nil
+	}
 	return u
 }

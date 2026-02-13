@@ -17,3 +17,8 @@ Thumbs.db
 
 # Dependencies
 vendor/
+
+# Logs and Backups
+bot.log
+*.log
+.env.backup

@@ -35,7 +35,7 @@ func (s *GoogleCalendarService) AddOrderToCalendar(order *models.Order) (string,
 	event := &calendar.Event{
 		Summary:     fmt.Sprintf("🚕 Taxi: %s ➞ %s", order.FromLocationName, order.ToLocationName),
 		Location:    order.FromLocationName,
-		Description: fmt.Sprintf("Yo'lovchilar: %d\nNarx: %d %s\nID: #%d", order.Passengers, order.Price, order.Currency, order.ID),
+		Description: fmt.Sprintf("Пассажиры: %d\nЦена: %d %s\nID: #%d", order.Passengers, order.Price, order.Currency, order.ID),
 		Start: &calendar.EventDateTime{
 			DateTime: startTime,
 			TimeZone: "Asia/Tashkent",

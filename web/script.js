@@ -1,6 +1,6 @@
 const tg = window.Telegram.WebApp;
-const monthNames = ["Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun", "Iyul", "Avgust", "Sentabr", "Oktabr", "Noyabr", "Dekabr"];
-const weekdayNames = ["Yakshanba", "Dushanba", "Seshanba", "Chorshanba", "Payshanba", "Juma", "Shanba"];
+const monthNames = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+const weekdayNames = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 
 let currentDate = new Date();
 let allOrders = [];
@@ -92,7 +92,7 @@ function showDetail(o) {
     document.getElementById('modalDate').innerText = `${date.getDate()}-${monthNames[date.getMonth()]}, ${weekdayNames[date.getDay()]}`;
     document.getElementById('modalTitle').innerText = `${o.FromLocationName} ➞ ${o.ToLocationName}`;
     document.getElementById('modalTime').innerText = `🕒 ${o.PickupTime.split('T')[1].substring(0, 5)}`;
-    document.getElementById('modalPax').innerText = `👥 ${o.Passengers} kishi`;
+    document.getElementById('modalPax').innerText = `👥 ${o.Passengers} чел.`;
     document.getElementById('modalPrice').innerText = `💰 ${o.Price.toLocaleString()} ${o.Currency || "RUB"}`;
 
     modal.classList.remove('hidden');

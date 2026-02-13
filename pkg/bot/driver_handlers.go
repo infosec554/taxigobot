@@ -10,6 +10,10 @@ import (
 )
 
 func (b *Bot) handleDriverTariffs(c tele.Context) error {
+	return b.showDriverTariffs(c, false)
+}
+
+func (b *Bot) showDriverTariffs(c tele.Context, deleteMode bool) error {
 	user := b.getCurrentUser(c)
 	tariffs, _ := b.Stg.Tariff().GetAll(context.Background())
 	enabled, _ := b.Stg.Tariff().GetEnabled(context.Background(), user.ID)
@@ -18,11 +22,20 @@ func (b *Bot) handleDriverTariffs(c tele.Context) error {
 	var rows []tele.Row
 	var currentRow []tele.Btn
 	for i, t := range tariffs {
-		icon := "🔴"
-		if enabled[t.ID] {
-			icon = "✅"
+		var text, data string
+		if deleteMode {
+			text = fmt.Sprintf("🗑 %s", t.Name)
+			data = fmt.Sprintf("del_tf_%d", t.ID)
+		} else {
+			icon := "🔴"
+			if enabled[t.ID] {
+				icon = "✅"
+			}
+			text = fmt.Sprintf("%s %s", icon, t.Name)
+			data = fmt.Sprintf("tgl_%d", t.ID)
 		}
-		currentRow = append(currentRow, menu.Data(fmt.Sprintf("%s %s", icon, t.Name), fmt.Sprintf("tgl_%d", t.ID)))
+
+		currentRow = append(currentRow, menu.Data(text, data))
 		if (i+1)%2 == 0 {
 			rows = append(rows, menu.Row(currentRow...))
 			currentRow = []tele.Btn{}
@@ -31,8 +44,27 @@ func (b *Bot) handleDriverTariffs(c tele.Context) error {
 	if len(currentRow) > 0 {
 		rows = append(rows, menu.Row(currentRow...))
 	}
+
+	// Control buttons
+	var controls []tele.Btn
+	if deleteMode {
+		controls = append(controls, menu.Data("🔙 Назад", "tf_back"))
+	} else {
+		controls = append(controls, menu.Data("🗑 Удалить", "tf_del_mode"))
+	}
+	rows = append(rows, menu.Row(controls...))
+
 	menu.Inline(rows...)
-	return c.Send("<b>🚕 Tariflarim</b>\n\nQaysi tariflardan buyurtma olmoqchisiz? Tanlang:", menu, tele.ModeHTML)
+
+	msg := "<b>🚕 Мои тарифы</b>\n\nИз каких тарифов вы хотите получать заказы? Выберите:"
+	if deleteMode {
+		msg = "<b>🗑 Режим удаления</b>\n\nВыберите тариф, который хотите удалить:"
+	}
+
+	if c.Callback() != nil {
+		return c.Edit(msg, menu, tele.ModeHTML)
+	}
+	return c.Send(msg, menu, tele.ModeHTML)
 }
 
 func (b *Bot) handleDriverRoutes(c tele.Context) error {
@@ -42,14 +74,14 @@ func (b *Bot) handleDriverRoutes(c tele.Context) error {
 	menu := &tele.ReplyMarkup{}
 	var rows []tele.Row
 
-	txt := "<b>📍 Yo'nalishlarim</b>\n\n"
+	txt := "<b>📍 Мои маршруты</b>\n\n"
 	if len(routes) == 0 {
-		txt += "Hozircha hech qanday yo'nalish qo'shmagansiz."
+		txt += "Вы еще не добавили ни одного маршрута."
 	} else {
 		for i, r := range routes {
 			from, _ := b.Stg.Location().GetByID(context.Background(), r[0])
 			to, _ := b.Stg.Location().GetByID(context.Background(), r[1])
-			fromName, toName := "Noma'lum", "Noma'lum"
+			fromName, toName := "Неизвестно", "Неизвестно"
 			if from != nil {
 				fromName = from.Name
 			}
@@ -60,9 +92,9 @@ func (b *Bot) handleDriverRoutes(c tele.Context) error {
 		}
 	}
 
-	rows = append(rows, menu.Row(menu.Data("➕ Yangi qo'shish", "add_route")))
+	rows = append(rows, menu.Row(menu.Data("➕ Добавить новый", "add_route")))
 	if len(routes) > 0 {
-		rows = append(rows, menu.Row(menu.Data("🗑 Tozalash", "clear_routes")))
+		rows = append(rows, menu.Row(menu.Data("🗑 Очистить", "clear_routes")))
 	}
 
 	menu.Inline(rows...)
@@ -88,7 +120,7 @@ func (b *Bot) handleAddRouteStart(c tele.Context, session *UserSession) error {
 	}
 	menu.Inline(rows...)
 
-	msg := "<b>📍 Qayerdan ketasiz?</b>\nShaharni tanlang:"
+	msg := "<b>📍 Откуда вы выезжаете?</b>\nВыберите город:"
 	if c.Callback() != nil {
 		return c.Edit(msg, menu, tele.ModeHTML)
 	}
@@ -103,7 +135,7 @@ func (b *Bot) handleDriverCalendarSearch(c tele.Context) error {
 func (b *Bot) handleDriverAgenda(c tele.Context) error {
 	orders, _ := b.Stg.Order().GetActiveOrders(context.Background())
 	if len(orders) == 0 {
-		return c.Send("Hozircha faol zakazlar yo'q.")
+		return c.Send("Активных заказов пока нет.")
 	}
 
 	// Group by date
@@ -120,7 +152,7 @@ func (b *Bot) handleDriverAgenda(c tele.Context) error {
 		groups[d] = append(groups[d], *o)
 	}
 
-	txt := "<b>📋 Haftalik zakazlar ro'yxat:</b>\n\n"
+	txt := "<b>📋 Список заказов на неделю:</b>\n\n"
 	for _, d := range dates {
 		parsedDate, _ := time.Parse("2006-01-02", d)
 		txt += fmt.Sprintf("📅 <b>%s</b>\n", parsedDate.Format("02.01.2006"))
@@ -131,7 +163,7 @@ func (b *Bot) handleDriverAgenda(c tele.Context) error {
 		txt += "\n"
 	}
 
-	txt += "<i>Batafsil ma'lumot uchun zakaz ID raqamini ko'ring.</i>"
+	txt += "<i>Для подробной информации введите ID заказа.</i>"
 	return c.Send(txt, tele.ModeHTML)
 }
 
@@ -144,55 +176,41 @@ func (b *Bot) handleDriverDateSearchAll(c tele.Context, dateStr string) error {
 }
 
 func (b *Bot) driverDateSearchLogic(c tele.Context, dateStr string, showAll bool) error {
-	user := b.getCurrentUser(c)
-	orders, _ := b.Stg.Order().GetActiveOrders(context.Background())
-	driverRoutes, _ := b.Stg.Route().GetDriverRoutes(context.Background(), user.ID)
-
-	// Convert routes to map for easy lookup: strings "FromID-ToID"
-	routeMap := make(map[string]bool)
-	for _, r := range driverRoutes {
-		routeMap[fmt.Sprintf("%d-%d", r[0], r[1])] = true
+	// showAll is now ignored as we always show all
+	layout := "2006-01-02"
+	date, err := time.Parse(layout, dateStr)
+	if err != nil {
+		return c.Send("❌ Неверный формат даты.")
 	}
-	hasRoutes := len(driverRoutes) > 0
 
-	foundAnyDate := false
-	foundForRoute := false
+	orders, err := b.Stg.Order().GetOrdersByDate(context.Background(), date)
+	if err != nil {
+		return c.Send("❌ Произошла ошибка.")
+	}
 
+	if len(orders) == 0 {
+		return c.Send(fmt.Sprintf("📅 На <b>%s</b> активных заказов не найдено.", date.Format("02.01.2006")), tele.ModeHTML)
+	}
+
+	c.Send(fmt.Sprintf("📅 <b>Заказы на %s:</b>", date.Format("02.01.2006")), tele.ModeHTML)
+
+	loc := time.FixedZone("Europe/Moscow", 3*60*60)
 	for _, o := range orders {
-		loc := time.FixedZone("Europe/Moscow", 3*60*60)
-		if o.PickupTime != nil && o.PickupTime.In(loc).Format("2006-01-02") == dateStr {
-			foundAnyDate = true
-
-			// Filter by route if driver has routes and NOT showing all
-			if hasRoutes && !showAll {
-				key := fmt.Sprintf("%d-%d", o.FromLocationID, o.ToLocationID)
-				if !routeMap[key] {
-					continue
-				}
-			}
-			foundForRoute = true
-
-			txt := fmt.Sprintf("📦 <b>ZAKAZ #%d</b>\n📍 %s ➡️ %s\n👥 %d kishi\n🕒 %s\n💰 %d %s",
-				o.ID, o.FromLocationName, o.ToLocationName, o.Passengers, o.PickupTime.In(loc).Format("15:04"), o.Price, o.Currency)
-
-			btnMenu := &tele.ReplyMarkup{}
-			btnMenu.Inline(btnMenu.Row(
-				btnMenu.Data("📥 Zakazni olish", fmt.Sprintf("take_%d", o.ID)),
-				btnMenu.Data("❌ Yopish", "close_msg"),
-			))
-			c.Send(txt, btnMenu, tele.ModeHTML)
+		timeStr := "Неизвестно"
+		if o.PickupTime != nil {
+			timeStr = o.PickupTime.In(loc).Format("15:04")
 		}
-	}
 
-	if !foundAnyDate {
-		return c.Send(fmt.Sprintf("📅 <b>%s</b> sanasida hech qanday faol zakaz topilmadi.", dateStr), tele.ModeHTML)
-	}
+		txt := fmt.Sprintf("📦 <b>Заказ #%d</b>\n📍 %s ➡️ %s\n👥 %d чел.\n🕒 %s\n💰 %d %s",
+			o.ID, o.FromLocationName, o.ToLocationName, o.Passengers, timeStr, o.Price, o.Currency)
 
-	if hasRoutes && !foundForRoute && !showAll {
-		// Found orders but not for this route. Offer to show all.
-		menu := &tele.ReplyMarkup{}
-		menu.Inline(menu.Row(menu.Data("🔄 Barchasini ko'rsatish", fmt.Sprintf("sc_cal_all_%s", dateStr))))
-		return c.Send(fmt.Sprintf("📅 <b>%s</b> sanasida sizning yo'nalishingiz bo'yicha zakazlar topilmadi.", dateStr), menu, tele.ModeHTML)
+		btnMenu := &tele.ReplyMarkup{}
+		if o.Status == "active" {
+			btnMenu.Inline(btnMenu.Row(
+				btnMenu.Data("📥 Принять заказ", fmt.Sprintf("take_%d", o.ID)),
+			))
+		}
+		c.Send(txt, btnMenu, tele.ModeHTML)
 	}
 
 	return nil

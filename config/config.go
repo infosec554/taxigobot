@@ -28,6 +28,8 @@ type Config struct {
 	AdminBotToken    string
 	AdminID          int64
 	AdminUsername    string
+	AdminLogin       string
+	AdminPassword    string
 }
 
 func Load() Config {
@@ -54,6 +56,8 @@ func Load() Config {
 	cfg.AdminBotToken = cast.ToString(getOrReturnDefault("ADMIN_BOT_TOKEN", ""))
 	cfg.AdminID = cast.ToInt64(getOrReturnDefault("ADMIN_ID", 0))
 	cfg.AdminUsername = cast.ToString(getOrReturnDefault("ADMIN_USERNAME", ""))
+	cfg.AdminLogin = cast.ToString(getOrReturnDefault("ADMIN_LOGIN", "admin"))
+	cfg.AdminPassword = cast.ToString(getOrReturnDefault("ADMIN_PASSWORD", "1234"))
 
 	return cfg
 }

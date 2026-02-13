@@ -39,6 +39,22 @@ func (r *userRepo) GetOrCreate(ctx context.Context, teleID int64, username, full
 	return &user, nil
 }
 
+func (r *userRepo) GetByID(ctx context.Context, id int64) (*models.User, error) {
+	var user models.User
+	query := `SELECT id, telegram_id, full_name, username, phone, role, status, language, created_at, updated_at FROM users WHERE id = $1`
+	err := r.db.QueryRow(ctx, query, id).Scan(
+		&user.ID, &user.TelegramID, &user.FullName, &user.Username, &user.Phone, &user.Role, &user.Status, &user.Language, &user.CreatedAt, &user.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		r.log.Error("failed to get user by id", logger.Error(err))
+		return nil, err
+	}
+	return &user, nil
+}
+
 func (r *userRepo) Get(ctx context.Context, teleID int64) (*models.User, error) {
 	var user models.User
 	query := `SELECT id, telegram_id, full_name, username, phone, role, status, language, created_at, updated_at FROM users WHERE telegram_id = $1`

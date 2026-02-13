@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="uz">
+<html lang="ru">
 
 <head>
     <meta charset="UTF-8">
@@ -13,7 +13,7 @@
     <div class="app-container">
         <header>
             <div class="header-left">
-                <span id="monthDisplay" class="month-display">Avgust 2026</span>
+                <span id="monthDisplay" class="month-display">Август 2026</span>
             </div>
             <div class="nav-buttons">
                 <button id="prevBtn" class="nav-btn">❮</button>
@@ -22,13 +22,13 @@
         </header>
 
         <main id="calendarGrid" class="calendar-grid">
-            <div class="weekday">Du</div>
-            <div class="weekday">Se</div>
-            <div class="weekday">Ch</div>
-            <div class="weekday">Pa</div>
-            <div class="weekday">Ju</div>
-            <div class="weekday">Sh</div>
-            <div class="weekday">Ya</div>
+            <div class="weekday">Пн</div>
+            <div class="weekday">Вт</div>
+            <div class="weekday">Ср</div>
+            <div class="weekday">Чт</div>
+            <div class="weekday">Пт</div>
+            <div class="weekday">Сб</div>
+            <div class="weekday">Вс</div>
             <!-- Days will be dynamically injected -->
         </main>
 
@@ -36,20 +36,20 @@
         <div id="orderModal" class="modal hidden">
             <div class="modal-content">
                 <div class="modal-header">
-                    <span id="modalDate" style="font-weight: 500; color: var(--google-gray);">13-avgust, Juma</span>
+                    <span id="modalDate" style="font-weight: 500; color: var(--google-gray);">13 августа, Пятница</span>
                     <button id="closeModal"
                         style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>
                 </div>
                 <div class="modal-body">
-                    <h2 id="modalTitle" class="modal-title">Toshkent ➞ Samarqand</h2>
+                    <h2 id="modalTitle" class="modal-title">Ташкент ➞ Самарканд</h2>
                     <p id="modalTime" class="modal-info">🕒 14:30</p>
-                    <p id="modalPax" class="modal-info">👥 3 kishi</p>
+                    <p id="modalPax" class="modal-info">👥 3 чел.</p>
                     <p id="modalPrice" class="modal-info" style="color: var(--google-blue); font-weight: 700;">💰
-                        250,000 so'm</p>
+                        250,000 сум</p>
                 </div>
                 <div class="action-bar">
-                    <button id="cancelModal" class="btn btn-secondary">Yopish</button>
-                    <button id="takeBtn" class="btn btn-primary">ZAKAZNI OLISH</button>
+                    <button id="cancelModal" class="btn btn-secondary">Закрыть</button>
+                    <button id="takeBtn" class="btn btn-primary">ПРИНЯТЬ ЗАКАЗ</button>
                 </div>
             </div>
         </div>

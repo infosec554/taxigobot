@@ -21,6 +21,7 @@ type IStorage interface {
 type IUserStorage interface {
 	GetOrCreate(ctx context.Context, teleID int64, username, fullname string) (*models.User, error)
 	Get(ctx context.Context, teleID int64) (*models.User, error)
+	GetByID(ctx context.Context, id int64) (*models.User, error)
 	GetAll(ctx context.Context) ([]*models.User, error)
 	UpdateLanguage(ctx context.Context, teleID int64, lang string) error
 	UpdateStatus(ctx context.Context, teleID int64, status string) error
@@ -37,6 +38,7 @@ type IOrderStorage interface {
 	GetActiveOrders(ctx context.Context) ([]*models.Order, error)
 	GetDriverOrders(ctx context.Context, driverID int64) ([]*models.Order, error)
 	GetOrdersByDate(ctx context.Context, date time.Time) ([]*models.Order, error)
+	RequestOrder(ctx context.Context, orderID int64, driverID int64) error
 	TakeOrder(ctx context.Context, orderID int64, driverID int64) error
 	CompleteOrder(ctx context.Context, orderID int64) error
 	CancelOrder(ctx context.Context, orderID int64) error

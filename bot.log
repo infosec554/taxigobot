@@ -1,9 +1,38 @@
-2026-02-13T12:38:40.022+0500	INFO	logger/logger.go:19	no migrations to apply	{"namespace": "taxibot"}
-2026-02-13T12:38:40.022+0500	INFO	logger/logger.go:19	Postgres connected	{"namespace": "taxibot"}
-2026-02-13T12:38:40.022+0500	INFO	logger/logger.go:19	🚀 Dual Bot Backend is initializing...	{"namespace": "taxibot"}
-2026-02-13T12:38:40.941+0500	INFO	logger/logger.go:19	🚀 Both bots are now running successfully.	{"namespace": "taxibot"}
-2026-02-13T12:38:40.941+0500	INFO	logger/logger.go:19	Bot 1 (Client) is starting...	{"namespace": "taxibot"}
-2026-02-13T12:38:40.941+0500	INFO	logger/logger.go:19	Bot 2 (Driver/Admin) is starting...	{"namespace": "taxibot"}
-2026-02-13T12:38:40.941+0500	INFO	logger/logger.go:19	🤖 client Bot Started...	{"namespace": "taxibot"}
-2026-02-13T12:38:40.941+0500	INFO	logger/logger.go:19	🤖 driver_admin Bot Started...	{"namespace": "taxibot"}
-2026-02-13T12:40:45.702+0500	INFO	logger/logger.go:19	Stopping bots and shutting down...	{"namespace": "taxibot"}
+2026-02-14T01:31:54.854+0500	INFO	logger/logger.go:19	no migrations to apply	{"namespace": "taxibot"}
+2026-02-14T01:31:54.854+0500	INFO	logger/logger.go:19	Postgres connected	{"namespace": "taxibot"}
+2026-02-14T01:31:54.854+0500	INFO	logger/logger.go:19	🚀 Dual Bot Backend is initializing...	{"namespace": "taxibot"}
+2026-02-14T01:31:56.416+0500	INFO	logger/logger.go:19	🚀 All 3 bots are now running successfully.	{"namespace": "taxibot"}
+2026-02-14T01:31:56.416+0500	INFO	logger/logger.go:19	🚀 Web Server is starting on :8081...	{"namespace": "taxibot"}
+2026-02-14T01:31:56.416+0500	INFO	logger/logger.go:19	Bot 2 (Driver) is starting...	{"namespace": "taxibot"}
+2026-02-14T01:31:56.416+0500	INFO	logger/logger.go:19	🤖 driver Bot Started...	{"namespace": "taxibot"}
+2026-02-14T01:31:56.416+0500	INFO	logger/logger.go:19	Bot 1 (Client) is starting...	{"namespace": "taxibot"}
+2026-02-14T01:31:56.416+0500	INFO	logger/logger.go:19	🤖 client Bot Started...	{"namespace": "taxibot"}
+2026-02-14T01:31:56.416+0500	INFO	logger/logger.go:19	Bot 3 (Admin) is starting...	{"namespace": "taxibot"}
+2026-02-14T01:31:56.417+0500	INFO	logger/logger.go:19	🤖 admin Bot Started...	{"namespace": "taxibot"}
+2026-02-14T01:33:10.898+0500	INFO	logger/logger.go:19	Start command received from 5609420533 ()	{"namespace": "taxibot"}
+2026-02-14T01:33:12.904+0500	INFO	logger/logger.go:19	DEBUG: Handle Order Start	{"namespace": "taxibot", "user_id": 5609420533}
+2026-02-14T01:33:15.217+0500	INFO	logger/logger.go:19	Handle Callback	{"namespace": "taxibot", "data": "cl_f_40", "from_id": 0, "to_id": 0}
+2026-02-14T01:33:15.217+0500	INFO	logger/logger.go:19	DEBUG: Handle Callback	{"namespace": "taxibot", "data": "cl_f_40", "is_order_flow": false, "from_id": 0, "to_id": 0, "tariff_id": 0}
+2026-02-14T01:33:17.938+0500	INFO	logger/logger.go:19	Handle Callback	{"namespace": "taxibot", "data": "cl_t_30", "from_id": 40, "to_id": 0}
+2026-02-14T01:33:17.938+0500	INFO	logger/logger.go:19	DEBUG: Handle Callback	{"namespace": "taxibot", "data": "cl_t_30", "is_order_flow": true, "from_id": 40, "to_id": 0, "tariff_id": 0}
+2026-02-14T01:33:19.751+0500	INFO	logger/logger.go:19	Handle Callback	{"namespace": "taxibot", "data": "tf_4", "from_id": 40, "to_id": 30}
+2026-02-14T01:33:19.751+0500	INFO	logger/logger.go:19	DEBUG: Handle Callback	{"namespace": "taxibot", "data": "tf_4", "is_order_flow": true, "from_id": 40, "to_id": 30, "tariff_id": 0}
+2026-02-14T01:33:22.539+0500	INFO	logger/logger.go:19	Handle Callback	{"namespace": "taxibot", "data": "cal_2026-02-20", "from_id": 40, "to_id": 30}
+2026-02-14T01:33:22.539+0500	INFO	logger/logger.go:19	DEBUG: Handle Callback	{"namespace": "taxibot", "data": "cal_2026-02-20", "is_order_flow": true, "from_id": 40, "to_id": 30, "tariff_id": 4}
+2026-02-14T01:33:24.684+0500	INFO	logger/logger.go:19	Handle Callback	{"namespace": "taxibot", "data": "time_14:00", "from_id": 40, "to_id": 30}
+2026-02-14T01:33:24.684+0500	INFO	logger/logger.go:19	DEBUG: Handle Callback	{"namespace": "taxibot", "data": "time_14:00", "is_order_flow": true, "from_id": 40, "to_id": 30, "tariff_id": 4}
+2026-02-14T01:33:26.866+0500	INFO	logger/logger.go:19	Handle Callback	{"namespace": "taxibot", "data": "confirm_yes", "from_id": 40, "to_id": 30}
+2026-02-14T01:33:26.866+0500	INFO	logger/logger.go:19	DEBUG: Handle Callback	{"namespace": "taxibot", "data": "confirm_yes", "is_order_flow": true, "from_id": 40, "to_id": 30, "tariff_id": 4}
+2026-02-14T01:35:14.036+0500	INFO	logger/logger.go:19	Start command received from 8453583608 ()	{"namespace": "taxibot"}
+2026-02-14T01:35:58.864+0500	INFO	logger/logger.go:19	Handle Callback	{"namespace": "taxibot", "data": "add_route", "from_id": 0, "to_id": 0}
+2026-02-14T01:35:58.864+0500	INFO	logger/logger.go:19	DEBUG: Handle Callback	{"namespace": "taxibot", "data": "add_route", "is_order_flow": false, "from_id": 0, "to_id": 0, "tariff_id": 0}
+2026-02-14T01:36:00.648+0500	INFO	logger/logger.go:19	Handle Callback	{"namespace": "taxibot", "data": "dr_f_43", "from_id": 0, "to_id": 0}
+2026-02-14T01:36:00.648+0500	INFO	logger/logger.go:19	DEBUG: Handle Callback	{"namespace": "taxibot", "data": "dr_f_43", "is_order_flow": false, "from_id": 0, "to_id": 0, "tariff_id": 0}
+2026-02-14T01:36:03.033+0500	INFO	logger/logger.go:19	Handle Callback	{"namespace": "taxibot", "data": "dr_t_48", "from_id": 43, "to_id": 0}
+2026-02-14T01:36:03.033+0500	INFO	logger/logger.go:19	DEBUG: Handle Callback	{"namespace": "taxibot", "data": "dr_t_48", "is_order_flow": false, "from_id": 43, "to_id": 0, "tariff_id": 0}
+2026-02-14T01:36:08.734+0500	INFO	logger/logger.go:19	Handle Callback	{"namespace": "taxibot", "data": "tgl_7", "from_id": 43, "to_id": 0}
+2026-02-14T01:36:08.734+0500	INFO	logger/logger.go:19	DEBUG: Handle Callback	{"namespace": "taxibot", "data": "tgl_7", "is_order_flow": false, "from_id": 43, "to_id": 0, "tariff_id": 0}
+2026-02-14T01:36:13.921+0500	INFO	logger/logger.go:19	Handle Callback	{"namespace": "taxibot", "data": "sc_cal_2026-02-21", "from_id": 43, "to_id": 0}
+2026-02-14T01:36:13.921+0500	INFO	logger/logger.go:19	DEBUG: Handle Callback	{"namespace": "taxibot", "data": "sc_cal_2026-02-21", "is_order_flow": false, "from_id": 43, "to_id": 0, "tariff_id": 0}
+2026-02-14T01:38:09.574+0500	INFO	logger/logger.go:19	Start command received from 8280219533 (zarifjorayev)	{"namespace": "taxibot"}
+2026-02-14T01:38:14.509+0500	INFO	logger/logger.go:19	Handle Text	{"namespace": "taxibot", "text": "📋 Mening zakazlarim"}
