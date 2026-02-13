@@ -16,12 +16,20 @@ func (b *Bot) handleDriverTariffs(c tele.Context) error {
 
 	menu := &tele.ReplyMarkup{}
 	var rows []tele.Row
-	for _, t := range tariffs {
+	var currentRow []tele.Btn
+	for i, t := range tariffs {
 		icon := "🔴"
 		if enabled[t.ID] {
 			icon = "✅"
 		}
-		rows = append(rows, menu.Row(menu.Data(fmt.Sprintf("%s %s", icon, t.Name), fmt.Sprintf("tgl_%d", t.ID))))
+		currentRow = append(currentRow, menu.Data(fmt.Sprintf("%s %s", icon, t.Name), fmt.Sprintf("tgl_%d", t.ID)))
+		if (i+1)%2 == 0 {
+			rows = append(rows, menu.Row(currentRow...))
+			currentRow = []tele.Btn{}
+		}
+	}
+	if len(currentRow) > 0 {
+		rows = append(rows, menu.Row(currentRow...))
 	}
 	menu.Inline(rows...)
 	return c.Send("<b>🚕 Tariflarim</b>\n\nQaysi tariflardan buyurtma olmoqchisiz? Tanlang:", menu, tele.ModeHTML)
@@ -80,7 +88,11 @@ func (b *Bot) handleAddRouteStart(c tele.Context, session *UserSession) error {
 	}
 	menu.Inline(rows...)
 
-	return c.Edit("<b>📍 Qayerdan ketasiz?</b>\nShaharni tanlang:", menu, tele.ModeHTML)
+	msg := "<b>📍 Qayerdan ketasiz?</b>\nShaharni tanlang:"
+	if c.Callback() != nil {
+		return c.Edit(msg, menu, tele.ModeHTML)
+	}
+	return c.Send(msg, menu, tele.ModeHTML)
 }
 
 func (b *Bot) handleDriverCalendarSearch(c tele.Context) error {
@@ -147,7 +159,8 @@ func (b *Bot) driverDateSearchLogic(c tele.Context, dateStr string, showAll bool
 	foundForRoute := false
 
 	for _, o := range orders {
-		if o.PickupTime != nil && o.PickupTime.Format("2006-01-02") == dateStr {
+		loc := time.FixedZone("Europe/Moscow", 3*60*60)
+		if o.PickupTime != nil && o.PickupTime.In(loc).Format("2006-01-02") == dateStr {
 			foundAnyDate = true
 
 			// Filter by route if driver has routes and NOT showing all
@@ -160,7 +173,7 @@ func (b *Bot) driverDateSearchLogic(c tele.Context, dateStr string, showAll bool
 			foundForRoute = true
 
 			txt := fmt.Sprintf("📦 <b>ZAKAZ #%d</b>\n📍 %s ➡️ %s\n👥 %d kishi\n🕒 %s\n💰 %d %s",
-				o.ID, o.FromLocationName, o.ToLocationName, o.Passengers, o.PickupTime.Format("15:04"), o.Price, o.Currency)
+				o.ID, o.FromLocationName, o.ToLocationName, o.Passengers, o.PickupTime.In(loc).Format("15:04"), o.Price, o.Currency)
 
 			btnMenu := &tele.ReplyMarkup{}
 			btnMenu.Inline(btnMenu.Row(

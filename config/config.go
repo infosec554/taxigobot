@@ -24,6 +24,7 @@ type Config struct {
 	RedisPassword string
 
 	TelegramBotToken string
+	DriverBotToken   string
 	AdminBotToken    string
 	AdminID          int64
 	AdminUsername    string
@@ -49,6 +50,7 @@ func Load() Config {
 	cfg.RedisPassword = cast.ToString(getOrReturnDefault("REDIS_PASSWORD", ""))
 
 	cfg.TelegramBotToken = cast.ToString(getOrReturnDefault("TG_BOT_TOKEN", ""))
+	cfg.DriverBotToken = cast.ToString(getOrReturnDefault("DRIVER_BOT_TOKEN", ""))
 	cfg.AdminBotToken = cast.ToString(getOrReturnDefault("ADMIN_BOT_TOKEN", ""))
 	cfg.AdminID = cast.ToInt64(getOrReturnDefault("ADMIN_ID", 0))
 	cfg.AdminUsername = cast.ToString(getOrReturnDefault("ADMIN_USERNAME", ""))

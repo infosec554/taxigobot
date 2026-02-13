@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -37,37 +38,58 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 5. Initialize Driver/Admin Bot (Bot 2)
-	driverAdminBot, err := bot.New(bot.BotTypeDriverAdmin, &cfg, pgStore, log)
+	// 5. Initialize Driver Bot (Bot 2)
+	driverBot, err := bot.New(bot.BotTypeDriver, &cfg, pgStore, log)
 	if err != nil {
-		log.Error("Failed to initialize driver/admin bot", logger.Error(err))
+		log.Error("Failed to initialize driver bot", logger.Error(err))
+		os.Exit(1)
+	}
+
+	// 6. Initialize Admin Bot (Bot 3)
+	adminBot, err := bot.New(bot.BotTypeAdmin, &cfg, pgStore, log)
+	if err != nil {
+		log.Error("Failed to initialize admin bot", logger.Error(err))
 		os.Exit(1)
 	}
 
 	// 🛠 PEER LINKING: Botlarni bir-biriga bog'laymiz (Notifikatsiyalar uchun)
-	clientBot.Peer = driverAdminBot
-	driverAdminBot.Peer = clientBot
+	// Client Peers
+	clientBot.Peers[bot.BotTypeDriver] = driverBot
+	clientBot.Peers[bot.BotTypeAdmin] = adminBot
 
-	// 6. Initialize Web Server (Mini App API & Static)
+	// Driver Peers
+	driverBot.Peers[bot.BotTypeClient] = clientBot
+	driverBot.Peers[bot.BotTypeAdmin] = adminBot
+
+	// Admin Peers
+	adminBot.Peers[bot.BotTypeClient] = clientBot
+	adminBot.Peers[bot.BotTypeDriver] = driverBot
+
+	// 7. Initialize Web Server (Mini App API & Static)
 	go func() {
-		log.Info("🚀 Web Server is starting on :8080...")
-		if err := bot.RunServer(pgStore, log); err != nil {
+		log.Info(fmt.Sprintf("🚀 Web Server is starting on :%d...", cfg.AppPort))
+		if err := bot.RunServer(&cfg, pgStore, log); err != nil {
 			log.Error("Failed to start web server", logger.Error(err))
 		}
 	}()
 
-	// 7. Run bots in parallel goroutines
+	// 8. Run bots in parallel goroutines
 	go func() {
 		log.Info("Bot 1 (Client) is starting...")
 		clientBot.Start()
 	}()
 
 	go func() {
-		log.Info("Bot 2 (Driver/Admin) is starting...")
-		driverAdminBot.Start()
+		log.Info("Bot 2 (Driver) is starting...")
+		driverBot.Start()
 	}()
 
-	log.Info("🚀 Both bots are now running successfully.")
+	go func() {
+		log.Info("Bot 3 (Admin) is starting...")
+		adminBot.Start()
+	}()
+
+	log.Info("🚀 All 3 bots are now running successfully.")
 
 	// 7. Graceful Shutdown listener
 	quit := make(chan os.Signal, 1)

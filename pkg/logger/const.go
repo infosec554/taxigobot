@@ -13,4 +13,5 @@ var (
 	String = zap.String
 	Error  = zap.Error
 	Any    = zap.Any
+	Bool   = zap.Bool
 )

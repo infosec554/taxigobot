@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"taxibot/pkg/models"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -35,6 +36,7 @@ type IOrderStorage interface {
 	GetClientOrders(ctx context.Context, clientID int64) ([]*models.Order, error)
 	GetActiveOrders(ctx context.Context) ([]*models.Order, error)
 	GetDriverOrders(ctx context.Context, driverID int64) ([]*models.Order, error)
+	GetOrdersByDate(ctx context.Context, date time.Time) ([]*models.Order, error)
 	TakeOrder(ctx context.Context, orderID int64, driverID int64) error
 	CompleteOrder(ctx context.Context, orderID int64) error
 	CancelOrder(ctx context.Context, orderID int64) error

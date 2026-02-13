@@ -6,6 +6,7 @@ import (
 	"taxibot/pkg/logger"
 	"taxibot/pkg/models"
 	"taxibot/storage"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -149,6 +150,20 @@ func (r *orderRepo) GetDriverOrders(ctx context.Context, driverID int64) ([]*mod
 		ORDER BY o.created_at DESC
 	`
 	return r.scanOrders(ctx, query, driverID)
+}
+
+func (r *orderRepo) GetOrdersByDate(ctx context.Context, date time.Time) ([]*models.Order, error) {
+	query := `
+		SELECT o.id, o.client_id, o.driver_id, o.from_location_id, o.to_location_id, o.tariff_id, o.price, o.currency, o.passengers, o.pickup_time, o.status, o.created_at,
+		       COALESCE(fl.name, 'Noma''lum') as from_location_name,
+		       COALESCE(tl.name, 'Noma''lum') as to_location_name
+		FROM orders o
+		LEFT JOIN locations fl ON o.from_location_id = fl.id
+		LEFT JOIN locations tl ON o.to_location_id = tl.id
+		WHERE o.status = 'active' AND o.pickup_time::date = $1::date
+		ORDER BY o.pickup_time ASC
+	`
+	return r.scanOrders(ctx, query, date)
 }
 
 func (r *orderRepo) scanOrders(ctx context.Context, query string, args ...interface{}) ([]*models.Order, error) {

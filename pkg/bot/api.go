@@ -2,14 +2,16 @@ package bot
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"taxibot/config"
 	"taxibot/pkg/logger"
 	"taxibot/storage"
 
 	"github.com/gin-gonic/gin"
 )
 
-func RunServer(stg storage.IStorage, log logger.ILogger) error {
+func RunServer(cfg *config.Config, stg storage.IStorage, log logger.ILogger) error {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -51,5 +53,5 @@ func RunServer(stg storage.IStorage, log logger.ILogger) error {
 		})
 	}
 
-	return r.Run(":8080")
+	return r.Run(fmt.Sprintf(":%d", cfg.AppPort))
 }
