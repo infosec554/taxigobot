@@ -83,7 +83,8 @@ func (s *Store) GetPool() *pgxpool.Pool {
 	return s.pool
 }
 
-func (s *Store) User() storage.IUserStorage           { return NewUserRepo(s.pool, s.log) }
-func (s *Store) Order() storage.IOrderStorage         { return NewOrderRepo(s.pool, s.log) }
-func (s *Store) Tariff() storage.ITariffStorage       { return NewTariffRepo(s.pool, s.log) }
-func (s *Store) Direction() storage.IDirectionStorage { return NewDirectionRepo(s.pool, s.log) }
+func (s *Store) User() storage.IUserStorage         { return NewUserRepo(s.pool, s.log) }
+func (s *Store) Order() storage.IOrderStorage       { return NewOrderRepo(s.pool, s.log) }
+func (s *Store) Tariff() storage.ITariffStorage     { return NewTariffRepo(s.pool, s.log) }
+func (s *Store) Location() storage.ILocationStorage { return NewLocationRepo(s.pool, s.log) }
+func (s *Store) Route() storage.IRouteStorage       { return NewRouteRepo(s.pool, s.log) }

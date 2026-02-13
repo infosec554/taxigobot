@@ -48,7 +48,15 @@ func main() {
 	clientBot.Peer = driverAdminBot
 	driverAdminBot.Peer = clientBot
 
-	// 6. Run bots in parallel goroutines
+	// 6. Initialize Web Server (Mini App API & Static)
+	go func() {
+		log.Info("🚀 Web Server is starting on :8080...")
+		if err := bot.RunServer(pgStore, log); err != nil {
+			log.Error("Failed to start web server", logger.Error(err))
+		}
+	}()
+
+	// 7. Run bots in parallel goroutines
 	go func() {
 		log.Info("Bot 1 (Client) is starting...")
 		clientBot.Start()

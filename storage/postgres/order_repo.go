@@ -21,14 +21,15 @@ func NewOrderRepo(db *pgxpool.Pool, log logger.ILogger) storage.IOrderStorage {
 
 func (r *orderRepo) Create(ctx context.Context, order *models.Order) (*models.Order, error) {
 	query := `
-		INSERT INTO orders (client_id, driver_id, direction_id, tariff_id, price, currency, passengers, pickup_time, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO orders (client_id, driver_id, from_location_id, to_location_id, tariff_id, price, currency, passengers, pickup_time, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id, created_at
 	`
 	err := r.db.QueryRow(ctx, query,
 		order.ClientID,
 		order.DriverID,
-		order.DirectionID,
+		order.FromLocationID,
+		order.ToLocationID,
 		order.TariffID,
 		order.Price,
 		order.Currency,
@@ -72,7 +73,7 @@ func (r *orderRepo) Update(ctx context.Context, order *models.Order) (*models.Or
 func (r *orderRepo) GetByID(ctx context.Context, id int64) (*models.Order, error) {
 	var order models.Order
 	query := `
-		SELECT id, client_id, driver_id, direction_id, tariff_id, price, currency, passengers, pickup_time, status, created_at
+		SELECT id, client_id, driver_id, from_location_id, to_location_id, tariff_id, price, currency, passengers, pickup_time, status, created_at
 		FROM orders
 		WHERE id = $1
 	`
@@ -80,7 +81,8 @@ func (r *orderRepo) GetByID(ctx context.Context, id int64) (*models.Order, error
 		&order.ID,
 		&order.ClientID,
 		&order.DriverID,
-		&order.DirectionID,
+		&order.FromLocationID,
+		&order.ToLocationID,
 		&order.TariffID,
 		&order.Price,
 		&order.Currency,
@@ -100,7 +102,7 @@ func (r *orderRepo) GetByID(ctx context.Context, id int64) (*models.Order, error
 
 func (r *orderRepo) GetAll(ctx context.Context) ([]*models.Order, error) {
 	query := `
-		SELECT id, client_id, driver_id, direction_id, tariff_id, price, currency, passengers, pickup_time, status, created_at
+		SELECT id, client_id, driver_id, from_location_id, to_location_id, tariff_id, price, currency, passengers, pickup_time, status, created_at
 		FROM orders
 		ORDER BY created_at DESC
 	`
@@ -109,30 +111,42 @@ func (r *orderRepo) GetAll(ctx context.Context) ([]*models.Order, error) {
 
 func (r *orderRepo) GetClientOrders(ctx context.Context, clientID int64) ([]*models.Order, error) {
 	query := `
-		SELECT id, client_id, driver_id, direction_id, tariff_id, price, currency, passengers, pickup_time, status, created_at
-		FROM orders
-		WHERE client_id = $1
-		ORDER BY created_at DESC
+		SELECT o.id, o.client_id, o.driver_id, o.from_location_id, o.to_location_id, o.tariff_id, o.price, o.currency, o.passengers, o.pickup_time, o.status, o.created_at,
+		       COALESCE(fl.name, 'Noma''lum') as from_location_name,
+		       COALESCE(tl.name, 'Noma''lum') as to_location_name
+		FROM orders o
+		LEFT JOIN locations fl ON o.from_location_id = fl.id
+		LEFT JOIN locations tl ON o.to_location_id = tl.id
+		WHERE o.client_id = $1
+		ORDER BY o.created_at DESC
 	`
 	return r.scanOrders(ctx, query, clientID)
 }
 
 func (r *orderRepo) GetActiveOrders(ctx context.Context) ([]*models.Order, error) {
 	query := `
-		SELECT id, client_id, driver_id, direction_id, tariff_id, price, currency, passengers, pickup_time, status, created_at
-		FROM orders
-		WHERE status = 'active'
-		ORDER BY created_at DESC
+		SELECT o.id, o.client_id, o.driver_id, o.from_location_id, o.to_location_id, o.tariff_id, o.price, o.currency, o.passengers, o.pickup_time, o.status, o.created_at,
+		       COALESCE(fl.name, 'Noma''lum') as from_location_name,
+		       COALESCE(tl.name, 'Noma''lum') as to_location_name
+		FROM orders o
+		LEFT JOIN locations fl ON o.from_location_id = fl.id
+		LEFT JOIN locations tl ON o.to_location_id = tl.id
+		WHERE o.status = 'active'
+		ORDER BY o.created_at DESC
 	`
 	return r.scanOrders(ctx, query)
 }
 
 func (r *orderRepo) GetDriverOrders(ctx context.Context, driverID int64) ([]*models.Order, error) {
 	query := `
-		SELECT id, client_id, driver_id, direction_id, tariff_id, price, currency, passengers, pickup_time, status, created_at
-		FROM orders
-		WHERE driver_id = $1
-		ORDER BY created_at DESC
+		SELECT o.id, o.client_id, o.driver_id, o.from_location_id, o.to_location_id, o.tariff_id, o.price, o.currency, o.passengers, o.pickup_time, o.status, o.created_at,
+		       COALESCE(fl.name, 'Noma''lum') as from_location_name,
+		       COALESCE(tl.name, 'Noma''lum') as to_location_name
+		FROM orders o
+		LEFT JOIN locations fl ON o.from_location_id = fl.id
+		LEFT JOIN locations tl ON o.to_location_id = tl.id
+		WHERE o.driver_id = $1
+		ORDER BY o.created_at DESC
 	`
 	return r.scanOrders(ctx, query, driverID)
 }
@@ -148,8 +162,9 @@ func (r *orderRepo) scanOrders(ctx context.Context, query string, args ...interf
 	for rows.Next() {
 		var o models.Order
 		err := rows.Scan(
-			&o.ID, &o.ClientID, &o.DriverID, &o.DirectionID, &o.TariffID,
+			&o.ID, &o.ClientID, &o.DriverID, &o.FromLocationID, &o.ToLocationID, &o.TariffID,
 			&o.Price, &o.Currency, &o.Passengers, &o.PickupTime, &o.Status, &o.CreatedAt,
+			&o.FromLocationName, &o.ToLocationName,
 		)
 		if err != nil {
 			return nil, err

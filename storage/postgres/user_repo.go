@@ -26,7 +26,7 @@ func (r *userRepo) GetOrCreate(ctx context.Context, teleID int64, username, full
 		INSERT INTO users (telegram_id, username, full_name, role, status)
 		VALUES ($1, $2, $3, 'client', 'pending')
 		ON CONFLICT (telegram_id) DO UPDATE 
-		SET username = EXCLUDED.username, full_name = EXCLUDED.full_name, updated_at = NOW()
+		SET updated_at = NOW()
 		RETURNING id, telegram_id, full_name, username, phone, role, status, language, created_at, updated_at
 	`
 	err := r.db.QueryRow(ctx, query, teleID, username, fullname).Scan(

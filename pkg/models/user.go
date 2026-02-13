@@ -7,7 +7,7 @@ type User struct {
 	TelegramID int64     `json:"telegram_id"`
 	Username   string    `json:"username"`
 	FullName   string    `json:"full_name"`
-	Phone      string    `json:"phone"`
+	Phone      *string   `json:"phone"`
 	Role       string    `json:"role"`
 	Status     string    `json:"status"`
 	Language   string    `json:"language"`

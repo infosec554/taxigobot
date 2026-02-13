@@ -1,0 +1,9 @@
+2026-02-13T12:38:40.022+0500	INFO	logger/logger.go:19	no migrations to apply	{"namespace": "taxibot"}
+2026-02-13T12:38:40.022+0500	INFO	logger/logger.go:19	Postgres connected	{"namespace": "taxibot"}
+2026-02-13T12:38:40.022+0500	INFO	logger/logger.go:19	🚀 Dual Bot Backend is initializing...	{"namespace": "taxibot"}
+2026-02-13T12:38:40.941+0500	INFO	logger/logger.go:19	🚀 Both bots are now running successfully.	{"namespace": "taxibot"}
+2026-02-13T12:38:40.941+0500	INFO	logger/logger.go:19	Bot 1 (Client) is starting...	{"namespace": "taxibot"}
+2026-02-13T12:38:40.941+0500	INFO	logger/logger.go:19	Bot 2 (Driver/Admin) is starting...	{"namespace": "taxibot"}
+2026-02-13T12:38:40.941+0500	INFO	logger/logger.go:19	🤖 client Bot Started...	{"namespace": "taxibot"}
+2026-02-13T12:38:40.941+0500	INFO	logger/logger.go:19	🤖 driver_admin Bot Started...	{"namespace": "taxibot"}
+2026-02-13T12:40:45.702+0500	INFO	logger/logger.go:19	Stopping bots and shutting down...	{"namespace": "taxibot"}
