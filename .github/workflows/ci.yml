@@ -1,0 +1,121 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  GO_VERSION: '1.24'
+  DOCKER_USERNAME: infosec554
+  DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+  DOCKER_IMAGE: infosec554/taxigobot
+
+jobs:
+  # ============================================
+  # 1. TEST & BUILD
+  # ============================================
+  test:
+    name: Test & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test -v -short -coverprofile=coverage.out ./...
+
+      - name: Build
+        run: go build -o main ./cmd/main.go
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.out
+          fail_ci_if_error: false
+
+  # ============================================
+  # 2. DOCKER BUILD & PUSH
+  # ============================================
+  docker:
+    name: Docker Build & Push
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKER_USERNAME }}
+          password: ${{ env.DOCKER_PASSWORD }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.DOCKER_IMAGE }}:latest
+            ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+          no-cache: true
+
+  # ============================================
+  # 3. DEPLOY TO SERVER
+  # ============================================
+  deploy:
+    name: Deploy to Server
+    runs-on: ubuntu-latest
+    needs: docker
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            cd /opt/speaklivego
+
+            # Pull latest image
+            docker pull ${{ env.DOCKER_IMAGE }}:latest
+
+            # Stop old container
+            docker stop speaklivego || true
+            docker rm speaklivego || true
+
+            # Run new container
+            docker run -d \
+              --name speaklivego \
+              --restart unless-stopped \
+              -p 8080:8080 \
+              --env-file .env \
+              -v /opt/speaklivego/migrations:/app/migrations \
+              ${{ env.DOCKER_IMAGE }}:latest
+
+            # Cleanup old images
+            docker image prune -f
+
+            echo "✅ Deployed successfully!"
