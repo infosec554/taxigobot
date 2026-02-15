@@ -1,0 +1,31 @@
+name: Check Server Logs
+on: workflow_dispatch
+
+jobs:
+  check-logs:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Get Server Status and Logs
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_KEY }}
+        script: |
+          echo "==================== CHECKING DIRECTORY ===================="
+          ls -la ~/radar-go-bot
+          
+          echo "==================== CHECKING .ENV FILE ===================="
+          if [ -f ~/radar-go-bot/.env ]; then
+            echo ".env file EXISTS ✅"
+          else
+            echo ".env file is MISSING ❌"
+          fi
+
+          cd ~/radar-go-bot || exit
+
+          echo "==================== DOCKER CONTAINERS ===================="
+          sudo docker ps -a
+
+          echo "==================== APP LOGS (LAST 100 LINES) ===================="
+          sudo docker compose logs --tail=100 app
