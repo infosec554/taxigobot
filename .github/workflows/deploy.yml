@@ -49,6 +49,8 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
+    - uses: actions/checkout@v4
+
     - name: Copy docker-compose.yaml to server
       uses: appleboy/scp-action@v0.1.7
       with:
