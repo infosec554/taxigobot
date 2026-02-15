@@ -49,6 +49,15 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
+    - name: Copy docker-compose.yaml to server
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_KEY }}
+        source: "docker-compose.yaml"
+        target: "~/radar-go-bot"
+
     - name: Deploy to VPS
       uses: appleboy/ssh-action@v1.0.3
       with:
@@ -56,19 +65,28 @@ jobs:
         username: ${{ secrets.SSH_USER }}
         key: ${{ secrets.SSH_KEY }}
         script: |
-          mkdir -p ~/radar-go-bot
-          cd ~/radar-go-bot || exit
-          docker pull infosec554/taxigobot:latest
-          docker compose down
-          # Use local docker-compose.yaml but pull images
-          # We might need to adjust docker-compose.yaml on server to use image from hub instead of build
-          # Or we can just use `image: ...` in docker-compose.yaml and remove `build: .`
-          # For now assuming user will update docker-compose.yaml on server or we cansed it
-          
-          # Updating docker-compose.yaml on flight to use image
-          sed -i 's|build: .*|image: infosec554/taxigobot:latest|' docker-compose.yaml
-          sed -i '/context: \./d' docker-compose.yaml
-          sed -i '/dockerfile: Dockerfile/d' docker-compose.yaml
+          # Install Docker if missing
+          if ! command -v docker &> /dev/null; then
+              echo "Docker not found. Installing..."
+              curl -fsSL https://get.docker.com -o get-docker.sh
+              sudo sh get-docker.sh
+              sudo usermod -aG docker ${{ secrets.SSH_USER }}
+              echo "Docker installed. Please re-login or use 'newgrp docker' to use without sudo."
+          fi
 
+          cd ~/radar-go-bot || exit
+          
+          # Replace build instruction with image from hub
+          if [ -f docker-compose.yaml ]; then
+              sed -i 's|build: .*|image: infosec554/taxigobot:latest|' docker-compose.yaml
+              sed -i '/context: \./d' docker-compose.yaml
+              sed -i '/dockerfile: Dockerfile/d' docker-compose.yaml
+          fi
+
+          echo "Pulling latest image..."
+          docker pull infosec554/taxigobot:latest
+          
+          echo "Restarting services..."
+          docker compose down
           docker compose up -d
           docker system prune -f
