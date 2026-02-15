@@ -27,7 +27,7 @@ jobs:
       with:
         context: .
         push: true
-        tags: ${{ secrets.DOCKER_USERNAME }}/taxibot:latest,${{ secrets.DOCKER_USERNAME }}/taxibot:${{ github.sha }}
+        tags: infosec554/taxigobot:latest,infosec554/taxigobot:${{ github.sha }}
 
   deploy:
     needs: build-and-push
@@ -41,7 +41,7 @@ jobs:
         key: ${{ secrets.SSH_KEY }}
         script: |
           cd /root/radar-go-bot || exit
-          docker pull ${{ secrets.DOCKER_USERNAME }}/taxibot:latest
+          docker pull infosec554/taxigobot:latest
           docker compose down
           # Use local docker-compose.yaml but pull images
           # We might need to adjust docker-compose.yaml on server to use image from hub instead of build
@@ -49,7 +49,7 @@ jobs:
           # For now assuming user will update docker-compose.yaml on server or we cansed it
           
           # Updating docker-compose.yaml on flight to use image
-          sed -i 's|build: .*|image: ${{ secrets.DOCKER_USERNAME }}/taxibot:latest|' docker-compose.yaml
+          sed -i 's|build: .*|image: infosec554/taxigobot:latest|' docker-compose.yaml
           sed -i '/context: \./d' docker-compose.yaml
           sed -i '/dockerfile: Dockerfile/d' docker-compose.yaml
 
