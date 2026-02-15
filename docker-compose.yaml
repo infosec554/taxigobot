@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: loadgo-app
+    container_name: radar-app
     restart: unless-stopped
     env_file:
       - .env
@@ -22,7 +22,7 @@ services:
       - REDIS_PASSWORD=${REDIS_PASSWORD}
       - MIGRATIONS_DIR=/app/migrations/postgres
       - LOGGER_LEVEL=debug
-      - TZ=Europe/Moscow
+      - TZ=Asia/Tashkent
     ports:
       - "${APP_PORT:-8080}:8080"
     depends_on:
@@ -31,11 +31,11 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - loadgo-network
+      - radar-network
 
   postgres:
     image: postgres:15-alpine
-    container_name: loadgo-postgres
+    container_name: radar-postgres
     restart: unless-stopped
     env_file:
       - .env
@@ -53,11 +53,11 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - loadgo-network
+      - radar-network
 
   redis:
     image: redis:7-alpine
-    container_name: loadgo-redis
+    container_name: radar-redis
     restart: unless-stopped
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes"]
     ports:
@@ -70,12 +70,12 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - loadgo-network
+      - radar-network
 
 volumes:
   postgres_data:
   redis_data:
 
 networks:
-  loadgo-network:
+  radar-network:
     driver: bridge

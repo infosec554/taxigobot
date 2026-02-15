@@ -88,3 +88,4 @@ func (s *Store) Order() storage.IOrderStorage       { return NewOrderRepo(s.pool
 func (s *Store) Tariff() storage.ITariffStorage     { return NewTariffRepo(s.pool, s.log) }
 func (s *Store) Location() storage.ILocationStorage { return NewLocationRepo(s.pool, s.log) }
 func (s *Store) Route() storage.IRouteStorage       { return NewRouteRepo(s.pool, s.log) }
+func (s *Store) Car() storage.ICarStorage           { return NewCarRepo(s.pool, s.log) }

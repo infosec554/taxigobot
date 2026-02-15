@@ -4,7 +4,6 @@ import (
 	"go.uber.org/zap"
 )
 
-
 type ILogger interface {
 	Info(msg string, fields ...Field)
 	Error(msg string, fields ...Field)

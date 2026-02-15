@@ -1,14 +1,14 @@
 # ============================================
-# SPEAKPALL - Makefile
+# TaxiBot - Makefile
 # ============================================
 
 # Variables
-APP_NAME := speakpall
+APP_NAME := taxibot
 MAIN_PATH := ./cmd/main.go
 BINARY := ./bin/$(APP_NAME)
-DOCKER_IMAGE := speakpall
+DOCKER_IMAGE := taxibot
 DOCKER_TAG := latest
-GO_VERSION := 1.24
+GO_VERSION := 1.25
 
 # Colors
 GREEN := \033[0;32m
@@ -22,7 +22,7 @@ NC := \033[0m # No Color
 # HELP
 # ============================================
 help: ## Show this help
-	@echo "$(GREEN)SPEAKPALL - Available commands:$(NC)"
+	@echo "$(GREEN)TaxiBot - Available commands:$(NC)"
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(YELLOW)%-20s$(NC) %s\n", $$1, $$2}'
 

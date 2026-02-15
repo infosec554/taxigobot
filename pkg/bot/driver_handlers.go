@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"fmt"
+	"taxibot/pkg/logger"
 	"taxibot/pkg/models"
 	"time"
 
@@ -51,6 +52,7 @@ func (b *Bot) showDriverTariffs(c tele.Context, deleteMode bool) error {
 		controls = append(controls, menu.Data("🔙 Назад", "tf_back"))
 	} else {
 		controls = append(controls, menu.Data("🗑 Удалить", "tf_del_mode"))
+		controls = append(controls, menu.Data("✅ Готово", "tf_done"))
 	}
 	rows = append(rows, menu.Row(controls...))
 
@@ -95,6 +97,7 @@ func (b *Bot) handleDriverRoutes(c tele.Context) error {
 	rows = append(rows, menu.Row(menu.Data("➕ Добавить новый", "add_route")))
 	if len(routes) > 0 {
 		rows = append(rows, menu.Row(menu.Data("🗑 Очистить", "clear_routes")))
+		rows = append(rows, menu.Row(menu.Data("✅ Далее", "routes_done")))
 	}
 
 	menu.Inline(rows...)
@@ -133,6 +136,11 @@ func (b *Bot) handleDriverCalendarSearch(c tele.Context) error {
 }
 
 func (b *Bot) handleDriverAgenda(c tele.Context) error {
+	user := b.getCurrentUser(c)
+	if user.Status != "active" {
+		return c.Send("🚫 <b>Доступ запрещен!</b>\n\nВаш профиль находится на проверке или заблокирован.", tele.ModeHTML)
+	}
+
 	orders, _ := b.Stg.Order().GetActiveOrders(context.Background())
 	if len(orders) == 0 {
 		return c.Send("Активных заказов пока нет.")
@@ -183,7 +191,13 @@ func (b *Bot) driverDateSearchLogic(c tele.Context, dateStr string, showAll bool
 		return c.Send("❌ Неверный формат даты.")
 	}
 
-	orders, err := b.Stg.Order().GetOrdersByDate(context.Background(), date)
+	// Get current user ID (driver ID)
+	user := b.getCurrentUser(c)
+	if user.Status != "active" {
+		return c.Send("🚫 <b>Доступ запрещен!</b>\n\nВаш профиль находится на проверке или заблокирован.", tele.ModeHTML)
+	}
+
+	orders, err := b.Stg.Order().GetOrdersByDate(context.Background(), date, user.ID)
 	if err != nil {
 		return c.Send("❌ Произошла ошибка.")
 	}
@@ -214,4 +228,57 @@ func (b *Bot) driverDateSearchLogic(c tele.Context, dateStr string, showAll bool
 	}
 
 	return nil
+}
+
+func (b *Bot) handleAddRouteTo(c tele.Context, session *UserSession) error {
+	session.State = StateDriverRouteTo
+	locations, _ := b.Stg.Location().GetAll(context.Background())
+
+	menu := &tele.ReplyMarkup{}
+	var rows []tele.Row
+	var currentRow []tele.Btn
+	for _, l := range locations {
+		if l.ID != session.OrderData.FromLocationID { // Reuse OrderData for temp storage of Route From
+			currentRow = append(currentRow, menu.Data(l.Name, fmt.Sprintf("dr_t_%d", l.ID)))
+			if (len(currentRow))%3 == 0 {
+				rows = append(rows, menu.Row(currentRow...))
+				currentRow = []tele.Btn{}
+			}
+		}
+	}
+	if len(currentRow) > 0 {
+		rows = append(rows, menu.Row(currentRow...))
+	}
+	menu.Inline(rows...)
+
+	return c.Edit("<b>🏁 Куда вы едете?</b>\nВыберите город:", menu, tele.ModeHTML)
+}
+
+func (b *Bot) handleAddRouteComplete(c tele.Context, session *UserSession) error {
+	user := b.getCurrentUser(c)
+	if user == nil {
+		return c.Send("❌ Ошибка: Пользователь не найден. Пожалуйста, нажмите /start.")
+	}
+
+	b.Log.Info("Adding Route", logger.Int64("driver_id", user.ID), logger.Int64("from", session.OrderData.FromLocationID), logger.Int64("to", session.OrderData.ToLocationID))
+
+	if session.OrderData.FromLocationID == 0 || session.OrderData.ToLocationID == 0 {
+		return c.Send("❌ Ошибка: Некорректные данные маршрута. Попробуйте еще раз.")
+	}
+
+	err := b.Stg.Route().AddRoute(context.Background(), user.ID, session.OrderData.FromLocationID, session.OrderData.ToLocationID)
+	if err != nil {
+		b.Log.Error("Failed to add route", logger.Error(err))
+		return c.Send("❌ Ошибка при сохранении маршрута.")
+	}
+
+	c.Send("✅ Маршрут добавлен!")
+
+	// Check if this was part of registration
+	if user.Status == "pending_signup" || user.Status == "pending_review" {
+		// Ask for Tariff if none selected, or Check Registration
+		return b.handleRegistrationCheck(c)
+	}
+
+	return b.handleDriverRoutes(c)
 }
