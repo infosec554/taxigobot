@@ -231,6 +231,7 @@ func (b *Bot) registerHandlers() {
 		b.Bot.Handle("🗺 Города", b.handleAdminLocations)
 		b.Bot.Handle("📊 Статистика", b.handleAdminStats)
 		b.Bot.Handle("🚖 Водители на проверке", b.handleAdminPendingDrivers)
+		b.Bot.Handle("🚕 Все водители", b.handleAdminActiveDrivers)
 		b.Bot.Handle("📦 Заказы на подтверждении", b.handleAdminPendingOrders)
 
 		b.Bot.Handle("➕ Добавить тариф", b.handleTariffAddStart)
@@ -402,7 +403,8 @@ func (b *Bot) showMenu(c tele.Context, user *models.User) error {
 	if user.Role == "admin" {
 		menu.Reply(
 			menu.Row(menu.Text("👥 Пользователи"), menu.Text("📊 Статистика")),
-			menu.Row(menu.Text("🚖 Водители на проверке"), menu.Text("📦 Заказы на подтверждении")),
+			menu.Row(menu.Text("🚖 Водители на проверке"), menu.Text("🚕 Все водители")),
+			menu.Row(menu.Text("📦 Заказы на подтверждении")),
 			menu.Row(menu.Text("📦 Все заказы")),
 			menu.Row(menu.Text("⚙️ Тарифы"), menu.Text("🗺 Города")),
 			menu.Row(menu.Text("🚗 Марки и модели"), menu.Text("🚫 Заблокированные")),
@@ -1611,8 +1613,14 @@ func (b *Bot) handleAdminCallbacks(c tele.Context, data string) error {
 	// Driver Moderation
 	if strings.HasPrefix(data, "approve_driver_") {
 		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "approve_driver_"), 10, 64)
+		// Protect admin role
+		user, _ := b.Stg.User().GetByID(context.Background(), id)
+		newRole := "driver"
+		if user != nil && user.Role == "admin" {
+			newRole = "admin"
+		}
 		b.Stg.User().UpdateStatusByID(context.Background(), id, "active")
-		b.Stg.User().UpdateRoleByID(context.Background(), id, "driver") // Ensure role is driver
+		b.Stg.User().UpdateRoleByID(context.Background(), id, newRole)
 		b.notifyDriverSpecific(id, "✅ Ваш аккаунт водителя подтвержден! Теперь вы можете принимать заказы.")
 		c.Edit(c.Callback().Message, fmt.Sprintf("%s\n\n✅ <b>Одобрено</b>", c.Callback().Message.Text), tele.ModeHTML)
 		return c.Respond(&tele.CallbackResponse{Text: "Водитель одобрен"})
@@ -1999,9 +2007,9 @@ func (b *Bot) notifyDrivers(orderID, fromID, toID, tariffID int64, text string) 
 	)
 
 	for _, u := range users {
-		if u.Role != "driver" || u.Status != "active" {
-			b.Log.Info("notifyDrivers: Skipping non-active driver",
-				logger.Int64("driver_id", u.ID),
+		if (u.Role != "driver" && u.Role != "admin") || u.Status != "active" {
+			b.Log.Info("notifyDrivers: Skipping non-active or non-driver user",
+				logger.Int64("user_id", u.ID),
 				logger.String("role", u.Role),
 				logger.String("status", u.Status),
 			)
@@ -2463,6 +2471,71 @@ func (b *Bot) handleAdminPendingDrivers(c tele.Context) error {
 				menu.Data(ru["admin_btn_reject"], fmt.Sprintf("reject_driver_%d", d.ID)),
 			),
 			menu.Row(menu.Data(ru["admin_btn_block"], fmt.Sprintf("block_driver_%d", d.ID))),
+		)
+		c.Send(msg, menu, tele.ModeHTML)
+	}
+	return nil
+}
+
+func (b *Bot) handleAdminActiveDrivers(c tele.Context) error {
+	ctx := context.Background()
+	adm, _ := b.Stg.User().Get(ctx, c.Sender().ID)
+	if adm == nil || adm.Role != "admin" {
+		return nil
+	}
+	drivers, err := b.Stg.User().GetActiveDrivers(ctx)
+	if err != nil {
+		b.Log.Error("Failed to get active drivers", logger.Error(err))
+		return c.Send("❌ Ошибка при получении списка водителей.")
+	}
+
+	if len(drivers) == 0 {
+		return c.Send("📭 Активных водителей пока нет.")
+	}
+
+	ru := messages["ru"]
+	for _, d := range drivers {
+		profile, _ := b.Stg.User().GetDriverProfile(ctx, d.ID)
+		carInfo := "Нет данных"
+		if profile != nil {
+			carInfo = fmt.Sprintf("🚗 %s %s (%s)", profile.CarBrand, profile.CarModel, profile.LicensePlate)
+		}
+
+		routes, _ := b.Stg.Route().GetDriverRoutes(ctx, d.ID)
+		routesStr := ""
+		for i, r := range routes {
+			from, _ := b.Stg.Location().GetByID(ctx, r[0])
+			to, _ := b.Stg.Location().GetByID(ctx, r[1])
+			fromName, toName := "?", "?"
+			if from != nil {
+				fromName = from.Name
+			}
+			if to != nil {
+				toName = to.Name
+			}
+			routesStr += fmt.Sprintf("\n📍 %d. %s ➡️ %s", i+1, fromName, toName)
+		}
+
+		enabledTariffs, _ := b.Stg.Tariff().GetEnabled(ctx, d.ID)
+		tariffsStr := ""
+		allTariffs, _ := b.Stg.Tariff().GetAll(ctx)
+		for _, t := range allTariffs {
+			if enabledTariffs[t.ID] {
+				tariffsStr += fmt.Sprintf("%s, ", t.Name)
+			}
+		}
+		if len(tariffsStr) > 2 {
+			tariffsStr = tariffsStr[:len(tariffsStr)-2]
+		}
+
+		msg := fmt.Sprintf("👤 <b>Водитель:</b> %s\n📞 Телефон: %s\n🆔 Telegram ID: %d\n📅 Дата регистрации: %s\n\n%s\n\n🛣 <b>Маршруты:</b>%s\n\n💰 <b>Тарифы:</b> %s",
+			d.FullName, *d.Phone, d.TelegramID, d.CreatedAt.Format("02.01.2006 15:04"), carInfo, routesStr, tariffsStr)
+
+		menu := &tele.ReplyMarkup{}
+		menu.Inline(
+			menu.Row(
+				menu.Data(ru["admin_btn_block"], fmt.Sprintf("block_driver_%d", d.ID)),
+			),
 		)
 		c.Send(msg, menu, tele.ModeHTML)
 	}

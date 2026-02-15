@@ -145,6 +145,28 @@ func (r *userRepo) GetPendingDrivers(ctx context.Context) ([]*models.User, error
 	return users, nil
 }
 
+func (r *userRepo) GetActiveDrivers(ctx context.Context) ([]*models.User, error) {
+	query := `SELECT id, telegram_id, full_name, username, phone, role, status, language, created_at, updated_at FROM users WHERE role = 'driver' AND status = 'active'`
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []*models.User
+	for rows.Next() {
+		var u models.User
+		err := rows.Scan(
+			&u.ID, &u.TelegramID, &u.FullName, &u.Username, &u.Phone, &u.Role, &u.Status, &u.Language, &u.CreatedAt, &u.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, &u)
+	}
+	return users, nil
+}
+
 func (r *userRepo) GetBlockedUsers(ctx context.Context) ([]*models.User, error) {
 	query := `SELECT id, telegram_id, full_name, username, phone, role, status, language, created_at, updated_at FROM users WHERE status = 'blocked' ORDER BY updated_at DESC`
 	rows, err := r.db.Query(ctx, query)

@@ -31,6 +31,7 @@ type IUserStorage interface {
 	UpdateRoleByID(ctx context.Context, id int64, role string) error
 	UpdatePhone(ctx context.Context, teleID int64, phone string) error
 	GetPendingDrivers(ctx context.Context) ([]*models.User, error)
+	GetActiveDrivers(ctx context.Context) ([]*models.User, error)
 	GetBlockedUsers(ctx context.Context) ([]*models.User, error)
 	GetTotalUsers(ctx context.Context) (int, error)
 	GetTotalDrivers(ctx context.Context) (int, error)
