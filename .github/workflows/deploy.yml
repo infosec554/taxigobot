@@ -78,11 +78,12 @@ jobs:
 
           cd ~/radar-go-bot || exit
           
-          # Replace build instruction with image from hub
+          # Replace multi-line build instruction with image from hub
           if [ -f docker-compose.yaml ]; then
-              sed -i 's|build: .*|image: infosec554/taxigobot:latest|' docker-compose.yaml
-              sed -i '/context: \./d' docker-compose.yaml
-              sed -i '/dockerfile: Dockerfile/d' docker-compose.yaml
+              # Remove the build block entirely (lines between build: and dockerfile:)
+              sed -i '/build:/,/dockerfile: Dockerfile/d' docker-compose.yaml
+              # Add image property after container_name
+              sed -i '/container_name: radar-app/a \    image: infosec554/taxigobot:latest' docker-compose.yaml
           fi
 
           echo "Pulling latest image..."
