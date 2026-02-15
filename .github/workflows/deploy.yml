@@ -56,7 +56,8 @@ jobs:
         username: ${{ secrets.SSH_USER }}
         key: ${{ secrets.SSH_KEY }}
         script: |
-          cd /root/radar-go-bot || exit
+          mkdir -p ~/radar-go-bot
+          cd ~/radar-go-bot || exit
           docker pull infosec554/taxigobot:latest
           docker compose down
           # Use local docker-compose.yaml but pull images
