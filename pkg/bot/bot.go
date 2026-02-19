@@ -401,8 +401,18 @@ func (b *Bot) handleContact(c tele.Context) error {
 
 	c.Send(messages["ru"]["registered"], tele.RemoveKeyboard)
 
-	// Driver botda DOIM registratsiyani boshlash — role DB dan kechikib kelishi mumkin
 	if b.Type == BotTypeDriver {
+		// Dastlabki xabar adminga
+		admins, _ := b.Stg.User().GetAll(ctx)
+		adminMsg := fmt.Sprintf("🆕 <b>Новая регистрация водителя</b>\n\n👤 %s\n📞 %s\n\n<i>Ожидайте завершения ввода данных автомобиля и маршрутов...</i>",
+			user.FullName, *user.Phone)
+
+		for _, u := range admins {
+			if u.Role == "admin" {
+				b.Bot.Send(&tele.User{ID: u.TelegramID}, adminMsg, tele.ModeHTML)
+			}
+		}
+
 		// Sessiyada to'g'ri DBID bo'lishini ta'minlaymiz
 		s := b.Sessions[c.Sender().ID]
 		if s == nil {
