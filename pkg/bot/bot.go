@@ -68,6 +68,8 @@ const (
 	StateCarModel      = "awaiting_car_model"
 	StateCarModelOther = "awaiting_car_model_other"
 	StateLicensePlate  = "awaiting_license_plate"
+
+	StatePrice = "awaiting_price"
 )
 
 func (b *Bot) handleWebApp(c tele.Context) error {
@@ -503,7 +505,8 @@ func (b *Bot) handleActiveOrders(c tele.Context) error {
 	for _, o := range orders {
 		timeStr := "Неизвестно"
 		if o.PickupTime != nil {
-			timeStr = o.PickupTime.Format("02.01.2006 15:04")
+			loc := time.FixedZone("Europe/Moscow", 3*60*60)
+			timeStr = o.PickupTime.In(loc).Format("02.01.2006 15:04")
 		}
 
 		txt := fmt.Sprintf("📦 <b>НОВЫЙ ЗАКАЗ #%d</b>\n\n📍 Маршрут: <b>%s ➡️ %s</b>\n💰 Цена: <b>%d %s</b>\n👥 Пассажиры: <b>%d</b>\n🕒 Время: <b>%s</b>\n\n👤 Клиент: <a href=\"tg://user?id=%d\">%s</a>\n📞 Тел: %s",
@@ -532,7 +535,8 @@ func (b *Bot) handleMyOrdersDriver(c tele.Context) error {
 	for _, o := range orders {
 		timeStr := "Неизвестно"
 		if o.PickupTime != nil {
-			timeStr = o.PickupTime.Format("02.01.2006 15:04")
+			loc := time.FixedZone("Europe/Moscow", 3*60*60)
+			timeStr = o.PickupTime.In(loc).Format("02.01.2006 15:04")
 		}
 
 		txt := fmt.Sprintf("🚖 <b>ЗАКАЗ #%d</b>\n📍 %s ➡️ %s\n👥 Пассажиры: %d\n💰 Цена: %d %s\n📅 Время: %s\n📊 Статус: %s\n\n👤 Клиент: <a href=\"tg://user?id=%d\">%s</a>\n📞 Тел: %s",
@@ -872,34 +876,42 @@ func (b *Bot) handleText(c tele.Context) error {
 			return c.Send("❌ Пожалуйста, введите корректное число пассажиров (например: 2).")
 		}
 		session.OrderData.Passengers = count
+		session.State = StatePrice
+		return c.Send("💰 <b>Укажите сумму за поездку (RUB):</b>\n\nНапример: <code>1500</code>", tele.ModeHTML)
+	case StatePrice:
+		priceStr := strings.TrimSpace(c.Text())
+		price, err := strconv.Atoi(priceStr)
+		if err != nil || price <= 0 {
+			return c.Send("❌ Неверный формат. Введите сумму числом (например: <code>1500</code>).", tele.ModeHTML)
+		}
+		session.OrderData.Price = price
 		session.State = StateConfirm
 
-		// Refresh names for confirmation message
 		from, _ := b.Stg.Location().GetByID(context.Background(), session.OrderData.FromLocationID)
 		to, _ := b.Stg.Location().GetByID(context.Background(), session.OrderData.ToLocationID)
 		tariff, _ := b.Stg.Tariff().GetByID(context.Background(), session.OrderData.TariffID)
 
-		fromName := "Неизвестно"
+		fromName, toName, tariffName := "Неизвестно", "Неизвестно", "Неизвестно"
 		if from != nil {
 			fromName = from.Name
 		}
-		toName := "Неизвестно"
 		if to != nil {
 			toName = to.Name
 		}
-		tariffName := "Неизвестно"
 		if tariff != nil {
 			tariffName = tariff.Name
 		}
 
 		timeStr := "Неизвестно"
 		if session.OrderData.PickupTime != nil {
-			timeStr = session.OrderData.PickupTime.In(time.FixedZone("Europe/Moscow", 3*60*60)).Format("02.01.2006 15:04")
+			loc := time.FixedZone("Europe/Moscow", 3*60*60)
+			timeStr = session.OrderData.PickupTime.In(loc).Format("02.01.2006 15:04")
 		}
 
-		msg := fmt.Sprintf("<b>💰 Подтверждение заказа</b>\n\n📍 <b>%s ➡️ %s</b>\n🚕 Тариф: <b>%s</b>\n👥 Пассажиры: <b>%d</b>\n📅 Время: <b>%s</b>\n\nПодтверждаете?",
-			fromName, toName, tariffName, session.OrderData.Passengers, timeStr)
-
+		msg := fmt.Sprintf(
+			"<b>✅ Подтверждение заказа</b>\n\n📍 <b>%s ➡️ %s</b>\n🚕 Тариф: <b>%s</b>\n👥 Пассажиры: <b>%d</b>\n💰 Сумма: <b>%d RUB</b>\n📅 Время: <b>%s</b>\n\nПодтверждаете?",
+			fromName, toName, tariffName, session.OrderData.Passengers, price, timeStr,
+		)
 		menu := &tele.ReplyMarkup{}
 		menu.Inline(menu.Row(
 			menu.Data("✅ Подтвердить", "confirm_yes"),
@@ -909,6 +921,10 @@ func (b *Bot) handleText(c tele.Context) error {
 	case StateLicensePlate:
 		return b.handleLicensePlateInput(c)
 	case StateCarModelOther:
+		if session.DriverProfile == nil {
+			user := b.getCurrentUser(c)
+			session.DriverProfile = &models.DriverProfile{UserID: user.ID}
+		}
 		session.DriverProfile.CarModel = c.Text()
 		session.State = StateLicensePlate
 		return c.Send("🔢 <b>Введите гос. номер автомобиля:</b>\n\nПример: <code>A123BC777</code> (русские буквы)", tele.ModeHTML)
@@ -1398,7 +1414,11 @@ func (b *Bot) handleCallback(c tele.Context) error {
 
 	if strings.HasPrefix(data, "del_tf_") {
 		tariffID, _ := strconv.ParseInt(strings.TrimPrefix(data, "del_tf_"), 10, 64)
-		b.Stg.Tariff().Delete(context.Background(), tariffID)
+		// Unsubscribe driver from tariff (Toggle removes if already enabled)
+		enabled, _ := b.Stg.Tariff().GetEnabled(context.Background(), session.DBID)
+		if enabled[tariffID] {
+			b.Stg.Tariff().Toggle(context.Background(), session.DBID, tariffID)
+		}
 		return b.showDriverTariffs(c, true)
 	}
 
@@ -1444,7 +1464,8 @@ func (b *Bot) handleCallback(c tele.Context) error {
 				}
 				timeStr := "Сейчас"
 				if session.OrderData.PickupTime != nil {
-					timeStr = session.OrderData.PickupTime.Format("02.01.2006 15:04")
+					loc := time.FixedZone("Europe/Moscow", 3*60*60)
+					timeStr = session.OrderData.PickupTime.In(loc).Format("02.01.2006 15:04")
 				}
 
 				clientName := "Неизвестно"
@@ -1496,8 +1517,8 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		utcTime := parsedTime.UTC()
 
 		session.OrderData.PickupTime = &utcTime
-		session.OrderData.Price = 0        // Will be set by driver or standard? Let's keep 0 or default
-		session.OrderData.Currency = "PKR" // Keeping default, though schema says RUB. User wanted Russia market, so maybe RUB? Changed to RUB in schema. Let's use RUB or whatever schema defaults. Schema defaults to RUB.
+		session.OrderData.Price = 0
+		session.OrderData.Currency = "RUB"
 
 		session.State = StatePassengers
 
@@ -1515,41 +1536,9 @@ func (b *Bot) handleCallback(c tele.Context) error {
 	if b.Type == BotTypeClient && strings.HasPrefix(data, "pass_") {
 		count, _ := strconv.Atoi(strings.TrimPrefix(data, "pass_"))
 		session.OrderData.Passengers = count
-		session.State = StateConfirm
-
-		// Refresh names for confirmation message
-		from, _ := b.Stg.Location().GetByID(context.Background(), session.OrderData.FromLocationID)
-		to, _ := b.Stg.Location().GetByID(context.Background(), session.OrderData.ToLocationID)
-		tariff, _ := b.Stg.Tariff().GetByID(context.Background(), session.OrderData.TariffID)
-
-		fromName := "Неизвестно"
-		if from != nil {
-			fromName = from.Name
-		}
-		toName := "Неизвестно"
-		if to != nil {
-			toName = to.Name
-		}
-		tariffName := "Неизвестно"
-		if tariff != nil {
-			tariffName = tariff.Name
-		}
-
-		timeStr := "Неизвестно"
-		if session.OrderData.PickupTime != nil {
-			timeStr = session.OrderData.PickupTime.In(time.FixedZone("Europe/Moscow", 3*60*60)).Format("02.01.2006 15:04")
-		}
-
-		msg := fmt.Sprintf("<b>💰 Подтверждение заказа</b>\n\n📍 <b>%s ➡️ %s</b>\n🚕 Тариф: <b>%s</b>\n👥 Пассажиры: <b>%d</b>\n📅 Время: <b>%s</b>\n\nПодтверждаете?",
-			fromName, toName, tariffName, session.OrderData.Passengers, timeStr)
-
-		menu := &tele.ReplyMarkup{}
-		menu.Inline(menu.Row(
-			menu.Data("✅ Подтвердить", "confirm_yes"),
-			menu.Data("❌ Отменить", "confirm_no"),
-		))
+		session.State = StatePrice
 		c.Respond(&tele.CallbackResponse{})
-		return c.Edit(msg, menu, tele.ModeHTML)
+		return c.Edit("💰 <b>Укажите сумму за поездку (RUB):</b>\n\nНапример: <code>1500</code>", tele.ModeHTML)
 	}
 
 	return nil
@@ -2115,7 +2104,8 @@ func (b *Bot) handleMyOrders(c tele.Context) error {
 	for _, o := range orders {
 		timeStr := "Неизвестно"
 		if o.PickupTime != nil {
-			timeStr = o.PickupTime.Format("02.01.2006 15:04")
+			loc := time.FixedZone("Europe/Moscow", 3*60*60)
+			timeStr = o.PickupTime.In(loc).Format("02.01.2006 15:04")
 		}
 
 		txt := fmt.Sprintf("📦 <b>Заказ #%d</b>\n📍 %s ➡️ %s\n👥 Пассажиры: %d\n📅 Время: %s\n📊 Статус: %s",
