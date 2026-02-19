@@ -69,3 +69,14 @@ func (r *carRepo) CreateModel(ctx context.Context, brandID int64, name string) e
 	_, err := r.db.Exec(ctx, query, brandID, name)
 	return err
 }
+
+func (r *carRepo) DeleteBrand(ctx context.Context, id int64) error {
+	// car_models has ON DELETE CASCADE so models are auto-deleted
+	_, err := r.db.Exec(ctx, `DELETE FROM car_brands WHERE id = $1`, id)
+	return err
+}
+
+func (r *carRepo) DeleteModel(ctx context.Context, id int64) error {
+	_, err := r.db.Exec(ctx, `DELETE FROM car_models WHERE id = $1`, id)
+	return err
+}

@@ -93,4 +93,6 @@ type ICarStorage interface {
 	GetModels(ctx context.Context, brandID int64) ([]*models.CarModel, error)
 	CreateBrand(ctx context.Context, name string) error
 	CreateModel(ctx context.Context, brandID int64, name string) error
+	DeleteBrand(ctx context.Context, id int64) error
+	DeleteModel(ctx context.Context, id int64) error
 }

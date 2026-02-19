@@ -246,6 +246,8 @@ func (b *Bot) registerHandlers() {
 		b.Bot.Handle("🚫 Заблокированные", b.handleAdminBlocked)
 		b.Bot.Handle("➕ Добавить марку", b.handleCarBrandAddStart)
 		b.Bot.Handle("➕ Добавить модель", b.handleCarModelAddStart)
+		b.Bot.Handle("🗑 Удалить марку", b.handleCarBrandDeleteStart)
+		b.Bot.Handle("🗑 Удалить модель", b.handleCarModelDeleteStart)
 	}
 
 	b.Bot.Handle(tele.OnCallback, b.handleCallback)
@@ -850,7 +852,8 @@ func (b *Bot) handleText(c tele.Context) error {
 		txt == "➕ Добавить тариф" || txt == "🗑 Удалить тариф" ||
 		txt == "➕ Добавить город" || txt == "🗑 Удалить город" || txt == "🔍 Найти город" ||
 		txt == "⬅️ Назад в меню" || txt == "🚗 Марки и модели" || txt == "🚫 Заблокированные" ||
-		txt == "➕ Добавить марку" || txt == "➕ Добавить модель"
+		txt == "➕ Добавить марку" || txt == "➕ Добавить модель" ||
+		txt == "🗑 Удалить марку" || txt == "🗑 Удалить модель"
 
 	if isMenu {
 		// If it's a menu button, we should probably reset state and let the specific handler take over
@@ -1604,6 +1607,47 @@ func (b *Bot) handleAdminCallbacks(c tele.Context, data string) error {
 		return c.Send("✏️ Введите название модели автомобиля:")
 	}
 
+	// Admin: delete car brand
+	if strings.HasPrefix(data, "adm_del_brand_") {
+		brandID, _ := strconv.ParseInt(strings.TrimPrefix(data, "adm_del_brand_"), 10, 64)
+		if err := b.Stg.Car().DeleteBrand(context.Background(), brandID); err != nil {
+			return c.Respond(&tele.CallbackResponse{Text: "❌ Ошибка удаления"})
+		}
+		c.Respond(&tele.CallbackResponse{Text: "✅ Марка удалена"})
+		return c.Edit("✅ <b>Марка удалена.</b>", tele.ModeHTML)
+	}
+
+	// Admin: select brand to delete its model
+	if strings.HasPrefix(data, "adm_sel_brand_del_") {
+		brandID, _ := strconv.ParseInt(strings.TrimPrefix(data, "adm_sel_brand_del_"), 10, 64)
+		models, _ := b.Stg.Car().GetModels(context.Background(), brandID)
+		if len(models) == 0 {
+			return c.Respond(&tele.CallbackResponse{Text: "Нет моделей для этой марки"})
+		}
+		menu := &tele.ReplyMarkup{}
+		var rows []tele.Row
+		for _, m := range models {
+			rows = append(rows, menu.Row(menu.Data(m.Name, fmt.Sprintf("adm_del_model_%d", m.ID))))
+		}
+		rows = append(rows, menu.Row(menu.Data("⬅️ Назад", "adm_del_model_cancel")))
+		menu.Inline(rows...)
+		c.Respond(&tele.CallbackResponse{})
+		return c.Edit("🗑 <b>Выберите модель для удаления:</b>", menu, tele.ModeHTML)
+	}
+
+	// Admin: delete car model
+	if strings.HasPrefix(data, "adm_del_model_") {
+		if data == "adm_del_model_cancel" {
+			return c.Respond(&tele.CallbackResponse{Text: "Отменено"})
+		}
+		modelID, _ := strconv.ParseInt(strings.TrimPrefix(data, "adm_del_model_"), 10, 64)
+		if err := b.Stg.Car().DeleteModel(context.Background(), modelID); err != nil {
+			return c.Respond(&tele.CallbackResponse{Text: "❌ Ошибка удаления"})
+		}
+		c.Respond(&tele.CallbackResponse{Text: "✅ Модель удалена"})
+		return c.Edit("✅ <b>Модель удалена.</b>", tele.ModeHTML)
+	}
+
 	// Разблокировать пользователя
 	if strings.HasPrefix(data, "unblock_") {
 		userDBID, _ := strconv.ParseInt(strings.TrimPrefix(data, "unblock_"), 10, 64)
@@ -1889,7 +1933,8 @@ func (b *Bot) approveOrderByAdmin(c tele.Context, orderID int64, successMsg stri
 	notifMsg += fmt.Sprintf("\n🚕 Тариф: <b>%s</b>\n👥 Пассажиров: <b>%d</b>", tariffName, order.Passengers)
 
 	b.notifyDrivers(order.ID, order.FromLocationID, order.ToLocationID, order.TariffID, notifMsg)
-	b.notifyUser(order.ClientID, "✅ Ваш заказ подтвержден администратором! Ищем водителя...")
+	clientNotif := fmt.Sprintf("✅ <b>Ваш заказ #%d подтвержден!</b>\n\n📍 %s\n💰 Цена: <b>%d %s</b>\n\nИщем водителя...", order.ID, routeStr, order.Price, order.Currency)
+	b.notifyUser(order.ClientID, clientNotif)
 
 	if successMsg != "" {
 		c.Edit(successMsg)
@@ -2191,6 +2236,7 @@ func (b *Bot) handleAdminCars(c tele.Context) error {
 	menu := &tele.ReplyMarkup{ResizeKeyboard: true}
 	menu.Reply(
 		menu.Row(menu.Text("➕ Добавить марку"), menu.Text("➕ Добавить модель")),
+		menu.Row(menu.Text("🗑 Удалить марку"), menu.Text("🗑 Удалить модель")),
 		menu.Row(menu.Text("⬅️ Назад в меню")),
 	)
 	var msg strings.Builder
@@ -2243,6 +2289,42 @@ func (b *Bot) handleCarModelAddStart(c tele.Context) error {
 	rows = append(rows, menu.Row(menu.Data("⬅️ Отмена", "car_addmodel_cancel")))
 	menu.Inline(rows...)
 	return c.Send("Выберите марку для новой модели:", menu)
+}
+
+func (b *Bot) handleCarBrandDeleteStart(c tele.Context) error {
+	if b.Type != BotTypeAdmin {
+		return nil
+	}
+	ctx := context.Background()
+	brands, err := b.Stg.Car().GetBrands(ctx)
+	if err != nil || len(brands) == 0 {
+		return c.Send("❌ Нет марок для удаления.")
+	}
+	menu := &tele.ReplyMarkup{}
+	var rows []tele.Row
+	for _, br := range brands {
+		rows = append(rows, menu.Row(menu.Data(fmt.Sprintf("🗑 %s", br.Name), fmt.Sprintf("adm_del_brand_%d", br.ID))))
+	}
+	menu.Inline(rows...)
+	return c.Send("🗑 <b>Выберите марку для удаления:</b>\n<i>Все модели марки тоже будут удалены.</i>", menu, tele.ModeHTML)
+}
+
+func (b *Bot) handleCarModelDeleteStart(c tele.Context) error {
+	if b.Type != BotTypeAdmin {
+		return nil
+	}
+	ctx := context.Background()
+	brands, err := b.Stg.Car().GetBrands(ctx)
+	if err != nil || len(brands) == 0 {
+		return c.Send("❌ Нет марок.")
+	}
+	menu := &tele.ReplyMarkup{}
+	var rows []tele.Row
+	for _, br := range brands {
+		rows = append(rows, menu.Row(menu.Data(br.Name, fmt.Sprintf("adm_sel_brand_del_%d", br.ID))))
+	}
+	menu.Inline(rows...)
+	return c.Send("🗑 <b>Выберите марку, из которой удалить модель:</b>", menu, tele.ModeHTML)
 }
 
 func (b *Bot) handleAdminBlocked(c tele.Context) error {
@@ -2582,9 +2664,9 @@ func (b *Bot) handleAdminPendingOrders(c tele.Context) error {
 		if clientDisplay == "" {
 			clientDisplay = "Неизвестно"
 		}
-		msg := fmt.Sprintf("📦 <b>Заказ #%d</b>\n\n👤 Клиент: @%s\n📞 Телефон: %s\n📊 История: Всего %d | ✅ %d | ❌ %d\n\n📍 Маршрут: %s ➡️ %s\n🚕 Тариф: %s\n👥 Пассажиры: %d\n📅 Время: %s",
+		msg := fmt.Sprintf("📦 <b>Заказ #%d</b>\n\n👤 Клиент: @%s\n📞 Телефон: %s\n📊 История: Всего %d | ✅ %d | ❌ %d\n\n📍 Маршрут: %s ➡️ %s\n🚕 Тариф: %s\n👥 Пассажиры: %d\n💰 Цена: %d %s\n📅 Время: %s",
 			o.ID, clientDisplay, o.ClientPhone, total, completed, cancelled,
-			o.FromLocationName, o.ToLocationName, tariffName, o.Passengers, pickupTimeStr)
+			o.FromLocationName, o.ToLocationName, tariffName, o.Passengers, o.Price, o.Currency, pickupTimeStr)
 
 		menu := &tele.ReplyMarkup{}
 		menu.Inline(
