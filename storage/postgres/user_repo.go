@@ -245,3 +245,8 @@ func (r *userRepo) GetDriverProfile(ctx context.Context, userID int64) (*models.
 
 	return &profile, nil
 }
+
+func (r *userRepo) DeleteUser(ctx context.Context, teleID int64) error {
+	_, err := r.db.Exec(ctx, `DELETE FROM users WHERE telegram_id = $1`, teleID)
+	return err
+}

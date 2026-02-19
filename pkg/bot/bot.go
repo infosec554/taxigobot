@@ -638,12 +638,11 @@ func (b *Bot) showUsersPage(c tele.Context, page int) error {
 		}
 
 		if u.Role == "admin" {
-			// Don't show role or block buttons for admin
-			rows = append(rows, menu.Row(menu.Data(fmt.Sprintf("🛡 Администратор: %s", u.FullName), "noop")))
+			rows = append(rows, menu.Row(menu.Data(fmt.Sprintf("🛡 %s (Администратор)", u.FullName), "noop")))
 		} else {
-			btnRole := menu.Data(fmt.Sprintf("🔄 Роль→%s", u.Role), fmt.Sprintf("adm_role_%d_%d", u.TelegramID, page))
 			btnBlock := menu.Data(blockBtnLabel, blockBtnData)
-			rows = append(rows, menu.Row(btnRole, btnBlock))
+			btnDel := menu.Data("🗑 Удалить", fmt.Sprintf("adm_del_user_%d_%d", u.TelegramID, page))
+			rows = append(rows, menu.Row(btnBlock, btnDel))
 		}
 	}
 
@@ -1815,6 +1814,15 @@ func (b *Bot) handleAdminCallbacks(c tele.Context, data string) error {
 			}
 			b.Stg.User().UpdateStatus(context.Background(), teleID, newStatus)
 		}
+		return b.showUsersPage(c, page)
+	}
+
+	if strings.HasPrefix(data, "adm_del_user_") {
+		parts := strings.Split(strings.TrimPrefix(data, "adm_del_user_"), "_") // teleID_page
+		teleID, _ := strconv.ParseInt(parts[0], 10, 64)
+		page, _ := strconv.Atoi(parts[1])
+		b.Stg.User().DeleteUser(context.Background(), teleID)
+		c.Respond(&tele.CallbackResponse{Text: "✅ Пользователь удалён"})
 		return b.showUsersPage(c, page)
 	}
 

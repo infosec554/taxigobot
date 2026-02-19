@@ -37,6 +37,7 @@ type IUserStorage interface {
 	GetTotalDrivers(ctx context.Context) (int, error)
 	CreateDriverProfile(ctx context.Context, profile *models.DriverProfile) error
 	GetDriverProfile(ctx context.Context, userID int64) (*models.DriverProfile, error)
+	DeleteUser(ctx context.Context, teleID int64) error
 }
 
 type IOrderStorage interface {
