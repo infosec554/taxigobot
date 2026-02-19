@@ -91,7 +91,11 @@ func (r *tariffRepo) Toggle(ctx context.Context, driverID, tariffID int64) (bool
 }
 
 func (r *tariffRepo) Delete(ctx context.Context, id int64) error {
-	query := `DELETE FROM tariffs WHERE id = $1`
-	_, err := r.db.Exec(ctx, query, id)
+	// Avval bog'liq driver_tariffs yozuvlarini o'chirish (FK constraint)
+	_, err := r.db.Exec(ctx, `DELETE FROM driver_tariffs WHERE tariff_id = $1`, id)
+	if err != nil {
+		return err
+	}
+	_, err = r.db.Exec(ctx, `DELETE FROM tariffs WHERE id = $1`, id)
 	return err
 }
