@@ -1413,21 +1413,25 @@ func (b *Bot) handleCallback(c tele.Context) error {
 	if data == "tf_done" {
 		// Faqat ro'yxatdan o'tish jarayonida registration check ishga tushsin
 		user := b.getCurrentUser(c)
+		c.Respond(&tele.CallbackResponse{})
 		if user != nil && (user.Status == "pending_signup" || user.Status == "pending_review") {
 			return b.handleRegistrationCheck(c)
 		}
-		// Ro'yxatdan o'tgan driver uchun asosiy menuga qaytish
+		// Ro'yxatdan o'tgan driver uchun inline xabarni o'chirib asosiy menuga qaytish
+		c.Delete()
 		return b.showMenu(c, user)
 	}
 
 	if data == "routes_done" {
 		// Faqat ro'yxatdan o'tish jarayonida tarif sahifasiga o'tish
 		user := b.getCurrentUser(c)
+		c.Respond(&tele.CallbackResponse{})
 		if user != nil && (user.Status == "pending_signup" || user.Status == "pending_review") {
 			return b.handleDriverTariffs(c)
 		}
-		// Ro'yxatdan o'tgan driver uchun faqat marshrut sahifasiga qaytish
-		return b.handleDriverRoutes(c)
+		// Ro'yxatdan o'tgan driver uchun inline xabarni o'chirib asosiy menuga qaytish
+		c.Delete()
+		return b.showMenu(c, user)
 	}
 
 	if strings.HasPrefix(data, "del_tf_") {
