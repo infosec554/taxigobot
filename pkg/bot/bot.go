@@ -617,12 +617,34 @@ func (b *Bot) showUsersPage(c tele.Context, page int) error {
 			}
 		}
 
-		msg.WriteString(fmt.Sprintf("🆔 <b>%d</b> | %s\n📞 %s | Роль: <b>%s</b> | Статус: <b>%s</b>\n", u.TelegramID, u.FullName, phone, u.Role, u.Status))
-		msg.WriteString("------------------------------\n")
+		statusIcon := "✅"
+		if u.Status == "blocked" {
+			statusIcon = "🚫"
+		} else if u.Status == "pending" || u.Status == "pending_signup" || u.Status == "pending_review" {
+			statusIcon = "⏳"
+		}
 
-		btnRole := menu.Data(fmt.Sprintf("🔄 Роль (%s)", u.FullName), fmt.Sprintf("adm_role_%d_%d", u.TelegramID, page))
-		btnStatus := menu.Data(fmt.Sprintf("🚫/✅ (%s)", u.FullName), fmt.Sprintf("adm_stat_%d_%d", u.TelegramID, page))
-		rows = append(rows, menu.Row(btnRole, btnStatus))
+		msg.WriteString(fmt.Sprintf("%s <b>%s</b> | <code>%d</code>\n📞 %s | Роль: <b>%s</b> | Статус: <b>%s</b>\n", statusIcon, u.FullName, u.TelegramID, phone, u.Role, u.Status))
+		msg.WriteString("——————————————\n")
+
+		// Block/Unblock button: show action opposite to current state
+		var blockBtnLabel, blockBtnData string
+		if u.Status == "blocked" {
+			blockBtnLabel = "✅ Разблок"
+			blockBtnData = fmt.Sprintf("adm_stat_%d_%d", u.TelegramID, page)
+		} else {
+			blockBtnLabel = "🚫 Блок"
+			blockBtnData = fmt.Sprintf("adm_stat_%d_%d", u.TelegramID, page)
+		}
+
+		if u.Role == "admin" {
+			// Don't show role or block buttons for admin
+			rows = append(rows, menu.Row(menu.Data(fmt.Sprintf("🛡 Администратор: %s", u.FullName), "noop")))
+		} else {
+			btnRole := menu.Data(fmt.Sprintf("🔄 Роль→%s", u.Role), fmt.Sprintf("adm_role_%d_%d", u.TelegramID, page))
+			btnBlock := menu.Data(blockBtnLabel, blockBtnData)
+			rows = append(rows, menu.Row(btnRole, btnBlock))
+		}
 	}
 
 	// Navigation
@@ -1794,6 +1816,10 @@ func (b *Bot) handleAdminCallbacks(c tele.Context, data string) error {
 			b.Stg.User().UpdateStatus(context.Background(), teleID, newStatus)
 		}
 		return b.showUsersPage(c, page)
+	}
+
+	if data == "noop" {
+		return c.Respond(&tele.CallbackResponse{})
 	}
 
 	if data == "admin_back" {
