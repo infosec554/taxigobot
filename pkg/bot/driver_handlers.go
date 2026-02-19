@@ -101,6 +101,9 @@ func (b *Bot) handleDriverRoutes(c tele.Context) error {
 	}
 
 	menu.Inline(rows...)
+	if c.Callback() != nil {
+		return c.Edit(txt, menu, tele.ModeHTML)
+	}
 	return c.Send(txt, menu, tele.ModeHTML)
 }
 
@@ -274,11 +277,7 @@ func (b *Bot) handleAddRouteComplete(c tele.Context, session *UserSession) error
 
 	c.Send("✅ Маршрут добавлен!")
 
-	// Check if this was part of registration
-	if user.Status == "pending_signup" || user.Status == "pending_review" {
-		// Ask for Tariff if none selected, or Check Registration
-		return b.handleRegistrationCheck(c)
-	}
-
+	// Har doim marshrut ro'yxatini ko'rsat (registration yoki oddiy rejim)
+	// handleRegistrationCheck faqat tf_done orqali chaqiriladi
 	return b.handleDriverRoutes(c)
 }
