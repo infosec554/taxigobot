@@ -900,8 +900,8 @@ func (b *Bot) handleText(c tele.Context) error {
 		txt == "🗑 Удалить марку" || txt == "🗑 Удалить модель"
 
 	if isMenu {
-		// If it's a menu button, we should probably reset state and let the specific handler take over
-		// But handlers for these are already registered, so we just return nil here to stop handleText
+		// Senior Fix: Reset state when switching between main menus to avoid state conflict
+		session.State = StateIdle
 		return nil
 	}
 
@@ -1658,7 +1658,7 @@ func (b *Bot) handleAdminCallbacks(c tele.Context, data string) error {
 	if strings.HasPrefix(data, "adm_del_brand_") {
 		brandID, _ := strconv.ParseInt(strings.TrimPrefix(data, "adm_del_brand_"), 10, 64)
 		if err := b.Stg.Car().DeleteBrand(context.Background(), brandID); err != nil {
-			return c.Respond(&tele.CallbackResponse{Text: "❌ Ошибка удаления"})
+			return c.Respond(&tele.CallbackResponse{Text: "❌ Ошибка. Сначала удалите все модели этой марки."})
 		}
 		c.Respond(&tele.CallbackResponse{Text: "✅ Марка удалена"})
 		return c.Edit("✅ <b>Марка удалена.</b>", tele.ModeHTML)

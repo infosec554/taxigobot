@@ -287,7 +287,13 @@ func (b *Bot) handleRegistrationCheck(c tele.Context) error {
 	msg := fmt.Sprintf("🔔 <b>НОВЫЙ ВОДИТЕЛЬ НА ПРОВЕРКЕ</b>\n\n👤 %s\n📞 %s\n%s\n\n📍 Маршрутов: %d\n🚕 Тарифov: %d",
 		user.FullName, phone, carDetails, len(routes), tariffCount)
 
-	// Send to admins — universal tugmalar (messages["ru"] dan)
+	// Send to admins — Use Admin Bot Peer if available to avoid 403
+	targetBot := b.Bot
+	if p, ok := b.Peers[BotTypeAdmin]; ok {
+		targetBot = p.Bot
+		b.Log.Info("Using Admin Bot peer for registration notification")
+	}
+
 	admins, _ := b.Stg.User().GetAll(context.Background())
 	ru := messages["ru"]
 	menu := &tele.ReplyMarkup{}
@@ -302,7 +308,7 @@ func (b *Bot) handleRegistrationCheck(c tele.Context) error {
 		if u.Role == "admin" {
 			adminCount++
 			b.Log.Info("Notifying admin about new driver", logger.Int64("admin_id", u.TelegramID), logger.Int64("driver_id", user.ID))
-			_, err := b.Bot.Send(&tele.User{ID: u.TelegramID}, msg, menu, tele.ModeHTML)
+			_, err := targetBot.Send(&tele.User{ID: u.TelegramID}, msg, menu, tele.ModeHTML)
 			if err != nil {
 				b.Log.Error("Failed to notify admin", logger.Error(err), logger.Int64("admin_id", u.TelegramID))
 			} else {
