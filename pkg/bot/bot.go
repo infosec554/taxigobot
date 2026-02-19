@@ -583,7 +583,10 @@ func (b *Bot) handleMyOrdersDriver(c tele.Context) error {
 
 		menu := &tele.ReplyMarkup{}
 		if o.Status == "taken" {
-			menu.Inline(menu.Row(menu.Data("🚗 Выехал", fmt.Sprintf("on_way_%d", o.ID))))
+			menu.Inline(
+				menu.Row(menu.Data("🚗 Выехал", fmt.Sprintf("on_way_%d", o.ID))),
+				menu.Row(menu.Data("↩️ Вернуть в пул", fmt.Sprintf("return_order_%d", o.ID))),
+			)
 		} else if o.Status == "on_way" {
 			menu.Inline(menu.Row(menu.Data("📍 Прибыл", fmt.Sprintf("arrived_%d", o.ID))))
 		} else if o.Status == "arrived" {
@@ -1340,6 +1343,47 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		return c.Respond()
 	}
 
+	if strings.HasPrefix(data, "return_order_") {
+		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "return_order_"), 10, 64)
+		order, _ := b.Stg.Order().GetByID(context.Background(), id)
+		if order == nil || order.Status != "taken" {
+			return c.Respond(&tele.CallbackResponse{Text: "Ошибка: Заказ уже в пути или завершен."})
+		}
+
+		// Reset status to active and remove driver
+		if _, err := b.DB.Exec(context.Background(), "UPDATE orders SET status='active', driver_id=NULL WHERE id=$1", id); err != nil {
+			return c.Respond(&tele.CallbackResponse{Text: "Ошибка базы данных"})
+		}
+
+		b.Bot.Edit(c.Callback().Message, "✅ Заказ возвращен в пул. Теперь его могут увидеть другие водители.")
+
+		// Senior Logic: Re-notify other drivers
+		from, _ := b.Stg.Location().GetByID(context.Background(), order.FromLocationID)
+		to, _ := b.Stg.Location().GetByID(context.Background(), order.ToLocationID)
+		tariff, _ := b.Stg.Tariff().GetByID(context.Background(), order.TariffID)
+		fromName, toName, tariffName := "Неизвестно", "Неизвестно", "Неизвестно"
+		if from != nil {
+			fromName = from.Name
+		}
+		if to != nil {
+			toName = to.Name
+		}
+		if tariff != nil {
+			tariffName = tariff.Name
+		}
+
+		priceStr := fmt.Sprintf("%d %s", order.Price, order.Currency)
+		routeStr := fmt.Sprintf("%s ➡️ %s", fromName, toName)
+		notifMsg := fmt.Sprintf("♻️ <b>ЗАКАЗ СНОВА ДОСТУПЕН (Вернул водитель)</b>\n\n🆔 #%d\n📍 %s\n💰 Цена: <b>%s</b>\n🚕 Тариф: <b>%s</b>", id, routeStr, priceStr, tariffName)
+
+		b.notifyDrivers(order.ID, order.FromLocationID, order.ToLocationID, order.TariffID, notifMsg)
+
+		// Notify Client
+		b.notifyUser(order.ClientID, fmt.Sprintf("⚠️ <b>Водитель отменил принятие заказа #%d.</b>\n\nМы снова ищем вам машину. Пожалуйста, подождите.", id))
+
+		return c.Respond()
+	}
+
 	if data == "agenda_view" {
 		return b.handleDriverAgenda(c)
 	}
@@ -1953,7 +1997,28 @@ func (b *Bot) handleAdminCallbacks(c tele.Context, data string) error {
 			b.notifyDriverSpecific(*requestedDriverID, fmt.Sprintf("❌ Админ отклонил ваш запрос на заказ. (#%d)", id))
 		}
 
-		return c.Edit("❌ Отклонено. Заказ снова активирован.")
+		// 3. Senior Fix: Recycler Logic - Re-notify other drivers that order is back in pool
+		from, _ := b.Stg.Location().GetByID(context.Background(), order.FromLocationID)
+		to, _ := b.Stg.Location().GetByID(context.Background(), order.ToLocationID)
+		tariff, _ := b.Stg.Tariff().GetByID(context.Background(), order.TariffID)
+		fromName, toName, tariffName := "Неизвестно", "Неизвестно", "Неизвестно"
+		if from != nil {
+			fromName = from.Name
+		}
+		if to != nil {
+			toName = to.Name
+		}
+		if tariff != nil {
+			tariffName = tariff.Name
+		}
+
+		priceStr := fmt.Sprintf("%d %s", order.Price, order.Currency)
+		routeStr := fmt.Sprintf("%s ➡️ %s", fromName, toName)
+		notifMsg := fmt.Sprintf("♻️ <b>ЗАКАЗ СНОВА ДОСТУПЕН</b>\n\n🆔 #%d\n📍 %s\n💰 Цена: <b>%s</b>\n🚕 Тариф: <b>%s</b>", id, routeStr, priceStr, tariffName)
+
+		b.notifyDrivers(order.ID, order.FromLocationID, order.ToLocationID, order.TariffID, notifMsg)
+
+		return c.Edit("❌ Отклонено. Заказ снова активирован и разослан водителям.")
 	}
 
 	return nil
@@ -2232,7 +2297,7 @@ func (b *Bot) handleMyOrders(c tele.Context) error {
 			o.ID, o.FromLocationName, o.ToLocationName, o.Passengers, timeStr, o.Status)
 
 		menu := &tele.ReplyMarkup{}
-		if o.Status == "active" || o.Status == "pending" {
+		if o.Status == "active" || o.Status == "pending" || o.Status == "wait_confirm" {
 			menu.Inline(menu.Row(menu.Data("❌ Отменить", fmt.Sprintf("cancel_%d", o.ID))))
 		}
 		c.Send(txt, menu, tele.ModeHTML)
