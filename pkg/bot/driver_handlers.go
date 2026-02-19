@@ -12,9 +12,9 @@ import (
 
 func (b *Bot) handleDriverTariffs(c tele.Context) error {
 	user := b.getCurrentUser(c)
-	// Allow active drivers OR pending drivers during registration
-	if user.Status != "active" && user.Status != "pending" {
-		return c.Send("🚫 <b>Доступ запрещен!</b>\n\nВаш профиid находится на проверке или заблокирован. Ожидайте подтверждения администратора.", tele.ModeHTML)
+	// Allow active drivers OR pending drivers during registration/review
+	if user.Status != "active" && user.Status != "pending" && user.Status != "pending_review" {
+		return c.Send("🚫 <b>Доступ запрещен!</b>\n\nВаш профиль находится на проверке или заблокирован. Ожидайте подтверждения администратора.", tele.ModeHTML)
 	}
 	return b.showDriverTariffs(c, false)
 }
@@ -76,8 +76,8 @@ func (b *Bot) showDriverTariffs(c tele.Context, deleteMode bool) error {
 
 func (b *Bot) handleDriverRoutes(c tele.Context) error {
 	user := b.getCurrentUser(c)
-	// Allow active drivers OR pending drivers during registration
-	if user.Status != "active" && user.Status != "pending" {
+	// Allow active drivers OR pending drivers during registration/review
+	if user.Status != "active" && user.Status != "pending" && user.Status != "pending_review" {
 		return c.Send("🚫 <b>Доступ запрещен!</b>\n\nВаш профиль находится на проверке или заблокирован. Ожидайте подтверждения администратора.", tele.ModeHTML)
 	}
 	routes, _ := b.Stg.Route().GetDriverRoutes(context.Background(), user.ID)
@@ -144,7 +144,8 @@ func (b *Bot) handleAddRouteStart(c tele.Context, session *UserSession) error {
 
 func (b *Bot) handleDriverCalendarSearch(c tele.Context) error {
 	user := b.getCurrentUser(c)
-	if user.Status != "active" {
+	// Allow active drivers OR pending drivers during registration/review
+	if user.Status != "active" && user.Status != "pending" && user.Status != "pending_review" {
 		return c.Send("🚫 <b>Доступ запрещен!</b>\n\nВаш профиль находится на проверке или заблокирован. Ожидайте подтверждения администратора.", tele.ModeHTML)
 	}
 	now := time.Now()

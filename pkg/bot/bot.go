@@ -546,7 +546,7 @@ func (b *Bot) handleActiveOrders(c tele.Context) error {
 
 func (b *Bot) handleMyOrdersDriver(c tele.Context) error {
 	user := b.getCurrentUser(c)
-	if user.Status != "active" {
+	if user.Status != "active" && user.Status != "pending_review" {
 		return c.Send("🚫 <b>Доступ запрещен!</b>\n\nВаш профиль находится на проверке или заблокирован. Ожидайте подтверждения администратора.", tele.ModeHTML)
 	}
 

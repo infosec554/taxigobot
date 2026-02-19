@@ -297,8 +297,10 @@ func (b *Bot) handleRegistrationCheck(c tele.Context) error {
 	))
 
 	sentCount := 0
+	adminCount := 0
 	for _, u := range admins {
 		if u.Role == "admin" {
+			adminCount++
 			b.Log.Info("Notifying admin about new driver", logger.Int64("admin_id", u.TelegramID), logger.Int64("driver_id", user.ID))
 			_, err := b.Bot.Send(&tele.User{ID: u.TelegramID}, msg, menu, tele.ModeHTML)
 			if err != nil {
@@ -308,7 +310,11 @@ func (b *Bot) handleRegistrationCheck(c tele.Context) error {
 			}
 		}
 	}
-	b.Log.Info("Driver registration notifications sent", logger.Int("sent_count", sentCount))
+	b.Log.Info("Driver registration notifications sent",
+		logger.Int("admins_found", adminCount),
+		logger.Int("sent_count", sentCount),
+		logger.Int64("driver_id", user.ID),
+	)
 
 	return nil
 }
