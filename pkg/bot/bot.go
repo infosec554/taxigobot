@@ -378,15 +378,24 @@ func (b *Bot) handleContact(c tele.Context) error {
 		return c.Send(messages["ru"]["blocked"])
 	}
 
-	b.Stg.User().UpdatePhone(ctx, c.Sender().ID, c.Message().Contact.PhoneNumber)
+	if err := b.Stg.User().UpdatePhone(ctx, c.Sender().ID, c.Message().Contact.PhoneNumber); err != nil {
+		b.Log.Error("Failed to update phone", logger.Error(err), logger.Int64("user_id", c.Sender().ID))
+		return c.Send("❌ Ошибка при сохранении номера телефона.")
+	}
 
 	// If registering via Driver Bot, set role to driver
 	if b.Type == BotTypeDriver {
-		b.Stg.User().UpdateRole(ctx, c.Sender().ID, "driver")
+		if err := b.Stg.User().UpdateRole(ctx, c.Sender().ID, "driver"); err != nil {
+			b.Log.Error("Failed to update role to driver", logger.Error(err), logger.Int64("user_id", c.Sender().ID))
+		}
 		// Do not set active yet, wait for full registration
-		b.Stg.User().UpdateStatus(ctx, c.Sender().ID, "pending_signup")
+		if err := b.Stg.User().UpdateStatus(ctx, c.Sender().ID, "pending_signup"); err != nil {
+			b.Log.Error("Failed to update status to pending_signup", logger.Error(err), logger.Int64("user_id", c.Sender().ID))
+		}
 	} else {
-		b.Stg.User().UpdateStatus(ctx, c.Sender().ID, "active")
+		if err := b.Stg.User().UpdateStatus(ctx, c.Sender().ID, "active"); err != nil {
+			b.Log.Error("Failed to update status to active", logger.Error(err), logger.Int64("user_id", c.Sender().ID))
+		}
 	}
 	user, _ = b.Stg.User().Get(ctx, c.Sender().ID)
 
@@ -536,9 +545,13 @@ func (b *Bot) handleActiveOrders(c tele.Context) error {
 }
 
 func (b *Bot) handleMyOrdersDriver(c tele.Context) error {
+	user := b.getCurrentUser(c)
+	if user.Status != "active" {
+		return c.Send("🚫 <b>Доступ запрещен!</b>\n\nВаш профиль находится на проверке или заблокирован. Ожидайте подтверждения администратора.", tele.ModeHTML)
+	}
+
 	session := b.Sessions[c.Sender().ID]
 	if session == nil {
-		user := b.getCurrentUser(c)
 		b.Sessions[c.Sender().ID] = &UserSession{DBID: user.ID, State: StateIdle}
 		session = b.Sessions[c.Sender().ID]
 	}

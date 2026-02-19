@@ -11,6 +11,10 @@ import (
 )
 
 func (b *Bot) handleDriverTariffs(c tele.Context) error {
+	user := b.getCurrentUser(c)
+	if user.Status != "active" {
+		return c.Send("🚫 <b>Доступ запрещен!</b>\n\nВаш профиль находится на проверке или заблокирован. Ожидайте подтверждения администратора.", tele.ModeHTML)
+	}
 	return b.showDriverTariffs(c, false)
 }
 
@@ -71,6 +75,9 @@ func (b *Bot) showDriverTariffs(c tele.Context, deleteMode bool) error {
 
 func (b *Bot) handleDriverRoutes(c tele.Context) error {
 	user := b.getCurrentUser(c)
+	if user.Status != "active" {
+		return c.Send("🚫 <b>Доступ запрещен!</b>\n\nВаш профиль находится на проверке или заблокирован. Ожидайте подтверждения администратора.", tele.ModeHTML)
+	}
 	routes, _ := b.Stg.Route().GetDriverRoutes(context.Background(), user.ID)
 
 	menu := &tele.ReplyMarkup{}
@@ -134,6 +141,10 @@ func (b *Bot) handleAddRouteStart(c tele.Context, session *UserSession) error {
 }
 
 func (b *Bot) handleDriverCalendarSearch(c tele.Context) error {
+	user := b.getCurrentUser(c)
+	if user.Status != "active" {
+		return c.Send("🚫 <b>Доступ запрещен!</b>\n\nВаш профиль находится на проверке или заблокирован. Ожидайте подтверждения администратора.", tele.ModeHTML)
+	}
 	now := time.Now()
 	return b.generateCalendarWithPrefix(c, now.Year(), int(now.Month()), "sc_cal_")
 }

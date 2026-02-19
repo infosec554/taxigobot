@@ -119,7 +119,7 @@ func (r *userRepo) UpdateRoleByID(ctx context.Context, id int64, role string) er
 }
 
 func (r *userRepo) UpdatePhone(ctx context.Context, teleID int64, phone string) error {
-	_, err := r.db.Exec(ctx, "UPDATE users SET phone=$1, status='active' WHERE telegram_id=$2", phone, teleID)
+	_, err := r.db.Exec(ctx, "UPDATE users SET phone=$1 WHERE telegram_id=$2", phone, teleID)
 	return err
 }
 
