@@ -265,12 +265,8 @@ func (b *Bot) handleRegistrationCheck(c tele.Context) error {
 
 	c.Send("🎉 <b>Регистрация завершена!</b>\n\nВаш профиль отправлен на проверку администратору. Ожидайте уведомления.", tele.ModeHTML)
 
-	// Notify Admin
-	// Build details string (profile already fetched above)
-	var carDetails string
-	if profile != nil {
-		carDetails = fmt.Sprintf("🚗 %s %s (%s)", profile.CarBrand, profile.CarModel, profile.LicensePlate)
-	}
+	// Notify Admin (orderID parameter is repurposed for user.ID here)
+	carDetails := fmt.Sprintf("🚗 %s %s (%s)", profile.CarBrand, profile.CarModel, profile.LicensePlate)
 
 	tariffCount := 0
 	for _, v := range enabledTariffs {
@@ -287,40 +283,8 @@ func (b *Bot) handleRegistrationCheck(c tele.Context) error {
 	msg := fmt.Sprintf("🔔 <b>НОВЫЙ ВОДИТЕЛЬ НА ПРОВЕРКЕ</b>\n\n👤 %s\n📞 %s\n%s\n\n📍 Маршрутов: %d\n🚕 Тарифov: %d",
 		user.FullName, phone, carDetails, len(routes), tariffCount)
 
-	// Send to admins — Use Admin Bot Peer if available to avoid 403
-	targetBot := b.Bot
-	if p, ok := b.Peers[BotTypeAdmin]; ok {
-		targetBot = p.Bot
-		b.Log.Info("Using Admin Bot peer for registration notification")
-	}
-
-	admins, _ := b.Stg.User().GetAll(context.Background())
-	ru := messages["ru"]
-	menu := &tele.ReplyMarkup{}
-	menu.Inline(menu.Row(
-		menu.Data(ru["admin_btn_approve"], fmt.Sprintf("approve_driver_%d", user.ID)),
-		menu.Data(ru["admin_btn_reject"], fmt.Sprintf("reject_driver_%d", user.ID)),
-	))
-
-	sentCount := 0
-	adminCount := 0
-	for _, u := range admins {
-		if u.Role == "admin" {
-			adminCount++
-			b.Log.Info("Notifying admin about new driver", logger.Int64("admin_id", u.TelegramID), logger.Int64("driver_id", user.ID))
-			_, err := targetBot.Send(&tele.User{ID: u.TelegramID}, msg, menu, tele.ModeHTML)
-			if err != nil {
-				b.Log.Error("Failed to notify admin", logger.Error(err), logger.Int64("admin_id", u.TelegramID))
-			} else {
-				sentCount++
-			}
-		}
-	}
-	b.Log.Info("Driver registration notifications sent",
-		logger.Int("admins_found", adminCount),
-		logger.Int("sent_count", sentCount),
-		logger.Int64("driver_id", user.ID),
-	)
+	// Notify Admin (orderID parameter is repurposed for user.ID here)
+	b.notifyAdmin(user.ID, msg, "registration")
 
 	return nil
 }

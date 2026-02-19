@@ -2122,21 +2122,34 @@ func (b *Bot) notifyAdmin(orderID int64, text string, msgType ...string) {
 	if b.Type != BotTypeAdmin {
 		if p, ok := b.Peers[BotTypeAdmin]; ok {
 			target = p
+			b.Log.Info("Using Admin Bot peer for notification", logger.Int64("order_id", orderID))
 		} else {
 			b.Log.Error("Admin bot peer not found for notification")
 			return
 		}
 	}
 
-	// Create Approval Keyboard
+	// Create Keyboard based on type
 	menu := &tele.ReplyMarkup{}
 
-	if len(msgType) > 0 && msgType[0] == "match" {
+	t := ""
+	if len(msgType) > 0 {
+		t = msgType[0]
+	}
+
+	switch t {
+	case "match":
 		menu.Inline(menu.Row(
 			menu.Data("✅ Подтвердить", fmt.Sprintf("approve_match_%d", orderID)),
 			menu.Data("❌ Отклонить", fmt.Sprintf("reject_match_%d", orderID)),
 		))
-	} else {
+	case "registration":
+		// For driver registration, orderID is actually userID
+		menu.Inline(menu.Row(
+			menu.Data(messages["ru"]["admin_btn_approve"], fmt.Sprintf("approve_driver_%d", orderID)),
+			menu.Data(messages["ru"]["admin_btn_reject"], fmt.Sprintf("reject_driver_%d", orderID)),
+		))
+	default:
 		menu.Inline(menu.Row(
 			menu.Data("✅ Подтвердить", fmt.Sprintf("adm_approve_%d", orderID)),
 			menu.Data("❌ Отменить", fmt.Sprintf("adm_reject_%d", orderID)),
@@ -2144,12 +2157,19 @@ func (b *Bot) notifyAdmin(orderID int64, text string, msgType ...string) {
 	}
 
 	// Send to all admins
-	admins, _ := b.Stg.User().GetAll(context.Background()) // Should filter for admins ideally
+	admins, _ := b.Stg.User().GetAll(context.Background())
+	sentCount := 0
 	for _, u := range admins {
 		if u.Role == "admin" {
-			target.Bot.Send(&tele.User{ID: u.TelegramID}, text, menu, tele.ModeHTML)
+			_, err := target.Bot.Send(&tele.User{ID: u.TelegramID}, text, menu, tele.ModeHTML)
+			if err != nil {
+				b.Log.Error("Failed to notify admin", logger.Error(err), logger.Int64("admin_id", u.TelegramID))
+			} else {
+				sentCount++
+			}
 		}
 	}
+	b.Log.Info("Admin notifications processed", logger.Int("sent_count", sentCount), logger.String("type", t))
 }
 
 func (b *Bot) notifyDrivers(orderID, fromID, toID, tariffID int64, text string) {
