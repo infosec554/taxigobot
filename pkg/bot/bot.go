@@ -345,8 +345,15 @@ func (b *Bot) handleContact(c tele.Context) error {
 	// within a short window to prevent double-processing when multiple
 	// bot instances or duplicate updates occur.
 	session := b.Sessions[c.Sender().ID]
+	ctx := context.Background()
 	if session == nil {
-		session = &UserSession{DBID: c.Sender().ID, State: StateIdle, OrderData: &models.Order{ClientID: c.Sender().ID}}
+		// DB dan to'g'ri ID ni olish kerak (TelegramID != DB ID)
+		dbUser, _ := b.Stg.User().Get(ctx, c.Sender().ID)
+		dbID := c.Sender().ID // fallback
+		if dbUser != nil {
+			dbID = dbUser.ID
+		}
+		session = &UserSession{DBID: dbID, State: StateIdle, OrderData: &models.Order{ClientID: dbID}}
 		b.Sessions[c.Sender().ID] = session
 	}
 	if time.Since(session.LastActionTime) < 2*time.Second {
@@ -357,7 +364,6 @@ func (b *Bot) handleContact(c tele.Context) error {
 	if c.Message().Contact.UserID != c.Sender().ID {
 		return c.Send("Пожалуйста, отправьте свой собственный номер.")
 	}
-	ctx := context.Background()
 	user, _ := b.Stg.User().Get(ctx, c.Sender().ID)
 	if user.Status == "blocked" {
 		return c.Send(messages["ru"]["blocked"])
@@ -1405,11 +1411,23 @@ func (b *Bot) handleCallback(c tele.Context) error {
 	}
 
 	if data == "tf_done" {
-		return b.handleRegistrationCheck(c)
+		// Faqat ro'yxatdan o'tish jarayonida registration check ishga tushsin
+		user := b.getCurrentUser(c)
+		if user != nil && (user.Status == "pending_signup" || user.Status == "pending_review") {
+			return b.handleRegistrationCheck(c)
+		}
+		// Ro'yxatdan o'tgan driver uchun asosiy menuga qaytish
+		return b.showMenu(c, user)
 	}
 
 	if data == "routes_done" {
-		return b.handleDriverTariffs(c)
+		// Faqat ro'yxatdan o'tish jarayonida tarif sahifasiga o'tish
+		user := b.getCurrentUser(c)
+		if user != nil && (user.Status == "pending_signup" || user.Status == "pending_review") {
+			return b.handleDriverTariffs(c)
+		}
+		// Ro'yxatdan o'tgan driver uchun faqat marshrut sahifasiga qaytish
+		return b.handleDriverRoutes(c)
 	}
 
 	if strings.HasPrefix(data, "del_tf_") {
@@ -1583,9 +1601,19 @@ func (b *Bot) handleAdminCallbacks(c tele.Context, data string) error {
 	}
 
 	if strings.HasPrefix(data, "set_role_") {
-		parts := strings.Split(data, "_")
-		id, _ := strconv.ParseInt(parts[3], 10, 64)
-		b.Stg.User().UpdateRole(context.Background(), id, parts[2])
+		// Format: set_role_{role}_{telegramID}
+		// Rol nomida '_' bo'lishi mumkin, shuning uchun oxiridan ID ajratamiz
+		trimmed := strings.TrimPrefix(data, "set_role_")
+		lastUnderscore := strings.LastIndex(trimmed, "_")
+		if lastUnderscore < 0 {
+			return c.Respond(&tele.CallbackResponse{Text: "❌ Неверный формат"})
+		}
+		role := trimmed[:lastUnderscore]
+		id, err := strconv.ParseInt(trimmed[lastUnderscore+1:], 10, 64)
+		if err != nil || role == "" {
+			return c.Respond(&tele.CallbackResponse{Text: "❌ Неверный формат"})
+		}
+		b.Stg.User().UpdateRole(context.Background(), id, role)
 		return c.Respond(&tele.CallbackResponse{Text: "OK"})
 	}
 	if strings.HasPrefix(data, "user_blk_") {
@@ -1636,46 +1664,7 @@ func (b *Bot) handleAdminCallbacks(c tele.Context, data string) error {
 			logger.Int64("admin_id", c.Sender().ID),
 			logger.Int64("order_id", id),
 		)
-		order, _ := b.Stg.Order().GetByID(context.Background(), id)
-		if order != nil {
-			order.Status = "active"
-			b.Stg.Order().Update(context.Background(), order)
-			b.Log.Info("Order approved successfully",
-				logger.Int64("order_id", id),
-				logger.String("new_status", "active"),
-			)
-
-			// Notify Drivers
-			from, _ := b.Stg.Location().GetByID(context.Background(), order.FromLocationID)
-			to, _ := b.Stg.Location().GetByID(context.Background(), order.ToLocationID)
-			tariff, _ := b.Stg.Tariff().GetByID(context.Background(), order.TariffID)
-
-			fromName, toName, tariffName := "Неизвестно", "Неизвестно", "Неизвестно"
-			if from != nil {
-				fromName = from.Name
-			}
-			if to != nil {
-				toName = to.Name
-			}
-			if tariff != nil {
-				tariffName = tariff.Name
-			}
-
-			priceStr := fmt.Sprintf("%d %s", order.Price, order.Currency)
-			routeStr := fmt.Sprintf("%s ➡️ %s", fromName, toName)
-			notifMsg := fmt.Sprintf(messages["ru"]["notif_new"], order.ID, priceStr, routeStr)
-			// Add more details to notification for drivers
-			notifMsg += fmt.Sprintf("\n🚕 Тариф: <b>%s</b>\n👥 Пассажиров: <b>%d</b>", tariffName, order.Passengers)
-
-			b.notifyDrivers(order.ID, order.FromLocationID, order.ToLocationID, order.TariffID, notifMsg)
-
-			// Notify Client
-			b.notifyUser(order.ClientID, "✅ Ваш заказ подтвержден администратором! Ищем водителя...")
-			c.Edit(c.Callback().Message, fmt.Sprintf("%s\n\n✅ <b>Подтверждено</b>", c.Callback().Message.Text), tele.ModeHTML)
-		} else {
-			c.Edit("❌ Заказ не найден.")
-		}
-		return c.Respond(&tele.CallbackResponse{Text: "Заказ одобрен"})
+		return b.approveOrderByAdmin(c, id, "")
 	}
 	if strings.HasPrefix(data, "reject_order_") {
 		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "reject_order_"), 10, 64)
@@ -1723,6 +1712,9 @@ func (b *Bot) handleAdminCallbacks(c tele.Context, data string) error {
 
 		user, _ := b.Stg.User().Get(context.Background(), teleID)
 		if user != nil {
+			if user.Role == "admin" {
+				return c.Respond(&tele.CallbackResponse{Text: "❌ Admin rolini o'zgartirib bo'lmaydi"})
+			}
 			newRole := "driver"
 			if user.Role == "driver" {
 				newRole = "client"
@@ -1764,46 +1756,13 @@ func (b *Bot) handleAdminCallbacks(c tele.Context, data string) error {
 	if strings.HasPrefix(data, "adm_approve_") {
 		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "adm_approve_"), 10, 64)
 		b.Log.Info("Admin approving order", logger.Int64("order_id", id))
-
-		order, _ := b.Stg.Order().GetByID(context.Background(), id)
-		if order != nil {
-			order.Status = "active"
-			b.Stg.Order().Update(context.Background(), order)
-
-			// Notify Drivers
-			from, _ := b.Stg.Location().GetByID(context.Background(), order.FromLocationID)
-			to, _ := b.Stg.Location().GetByID(context.Background(), order.ToLocationID)
-			tariff, _ := b.Stg.Tariff().GetByID(context.Background(), order.TariffID)
-
-			fromName, toName, tariffName := "Неизвестно", "Неизвестно", "Неизвестно"
-			if from != nil {
-				fromName = from.Name
-			}
-			if to != nil {
-				toName = to.Name
-			}
-			if tariff != nil {
-				tariffName = tariff.Name
-			}
-
-			priceStr := fmt.Sprintf("%d %s", order.Price, order.Currency)
-			routeStr := fmt.Sprintf("%s ➡️ %s", fromName, toName)
-			notifMsg := fmt.Sprintf(messages["ru"]["notif_new"], order.ID, priceStr, routeStr)
-			notifMsg += fmt.Sprintf("\n🚕 Тариф: <b>%s</b>\n👥 Пассажиров: <b>%d</b>", tariffName, order.Passengers)
-
-			b.notifyDrivers(order.ID, order.FromLocationID, order.ToLocationID, order.TariffID, notifMsg)
-
-			// Notify Client
-			b.notifyUser(order.ClientID, "✅ Ваш заказ подтвержден администратором! Ищем водителя...")
-			return c.Edit("✅ Подтверждено и отправлено водителям.")
-		}
-		return c.Edit("❌ Произошла ошибка: Заказ не найден.")
+		return b.approveOrderByAdmin(c, id, "✅ Подтверждено и отправлено водителям.")
 	}
 
 	if strings.HasPrefix(data, "adm_reject_") {
 		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "adm_reject_"), 10, 64)
 		b.Log.Info("Admin rejecting order", logger.Int64("order_id", id))
-		b.Stg.Order().CancelOrder(context.Background(), id)
+		b.Stg.Order().UpdateStatus(context.Background(), id, "cancelled_by_admin")
 		order, _ := b.Stg.Order().GetByID(context.Background(), id)
 		if order != nil {
 			b.notifyUser(order.ClientID, "❌ Ваш заказ отменен администратором.")
@@ -1882,6 +1841,50 @@ func (b *Bot) handleAdminCallbacks(c tele.Context, data string) error {
 	}
 
 	return nil
+}
+
+// approveOrderByAdmin — umumiy order tasdiqlash logikasi.
+// successMsg bo'sh bo'lsa, xabarga "✅ Подтверждено" qo'shiladi.
+func (b *Bot) approveOrderByAdmin(c tele.Context, orderID int64, successMsg string) error {
+	order, _ := b.Stg.Order().GetByID(context.Background(), orderID)
+	if order == nil {
+		c.Edit("❌ Заказ не найден.")
+		return c.Respond(&tele.CallbackResponse{Text: "Заказ не найден"})
+	}
+
+	order.Status = "active"
+	b.Stg.Order().Update(context.Background(), order)
+	b.Log.Info("Order approved", logger.Int64("order_id", orderID), logger.String("status", "active"))
+
+	from, _ := b.Stg.Location().GetByID(context.Background(), order.FromLocationID)
+	to, _ := b.Stg.Location().GetByID(context.Background(), order.ToLocationID)
+	tariff, _ := b.Stg.Tariff().GetByID(context.Background(), order.TariffID)
+
+	fromName, toName, tariffName := "Неизвестно", "Неизвестно", "Неизвестно"
+	if from != nil {
+		fromName = from.Name
+	}
+	if to != nil {
+		toName = to.Name
+	}
+	if tariff != nil {
+		tariffName = tariff.Name
+	}
+
+	priceStr := fmt.Sprintf("%d %s", order.Price, order.Currency)
+	routeStr := fmt.Sprintf("%s ➡️ %s", fromName, toName)
+	notifMsg := fmt.Sprintf(messages["ru"]["notif_new"], order.ID, priceStr, routeStr)
+	notifMsg += fmt.Sprintf("\n🚕 Тариф: <b>%s</b>\n👥 Пассажиров: <b>%d</b>", tariffName, order.Passengers)
+
+	b.notifyDrivers(order.ID, order.FromLocationID, order.ToLocationID, order.TariffID, notifMsg)
+	b.notifyUser(order.ClientID, "✅ Ваш заказ подтвержден администратором! Ищем водителя...")
+
+	if successMsg != "" {
+		c.Edit(successMsg)
+	} else {
+		c.Edit(c.Callback().Message, fmt.Sprintf("%s\n\n✅ <b>Подтверждено</b>", c.Callback().Message.Text), tele.ModeHTML)
+	}
+	return c.Respond(&tele.CallbackResponse{Text: "Заказ одобрен"})
 }
 
 func (b *Bot) notifyDriverSpecific(driverID int64, text string) {
@@ -1996,7 +1999,7 @@ func (b *Bot) notifyDrivers(orderID, fromID, toID, tariffID int64, text string) 
 	)
 
 	for _, u := range users {
-		if (u.Role != "driver" && u.Role != "admin") || u.Status != "active" {
+		if u.Role != "driver" || u.Status != "active" {
 			b.Log.Info("notifyDrivers: Skipping non-active or non-driver user",
 				logger.Int64("user_id", u.ID),
 				logger.String("role", u.Role),
@@ -2451,8 +2454,9 @@ func (b *Bot) handleAdminPendingDrivers(c tele.Context) error {
 			tariffsStr = tariffsStr[:len(tariffsStr)-2]
 		}
 
+		moscowLoc := time.FixedZone("Europe/Moscow", 3*60*60)
 		msg := fmt.Sprintf("👤 <b>Водитель:</b> %s\n📞 Телефон: %s\n🆔 Telegram ID: %d\n📅 Дата регистрации: %s\n\n%s\n\n🛣 <b>Маршруты:</b>%s\n\n💰 <b>Тарифы:</b> %s",
-			d.FullName, *d.Phone, d.TelegramID, d.CreatedAt.Format("02.01.2006 15:04"), carInfo, routesStr, tariffsStr)
+			d.FullName, *d.Phone, d.TelegramID, d.CreatedAt.In(moscowLoc).Format("02.01.2006 15:04"), carInfo, routesStr, tariffsStr)
 
 		menu := &tele.ReplyMarkup{}
 		menu.Inline(
@@ -2518,8 +2522,9 @@ func (b *Bot) handleAdminActiveDrivers(c tele.Context) error {
 			tariffsStr = tariffsStr[:len(tariffsStr)-2]
 		}
 
+		moscowLoc := time.FixedZone("Europe/Moscow", 3*60*60)
 		msg := fmt.Sprintf("👤 <b>Водитель:</b> %s\n📞 Телефон: %s\n🆔 Telegram ID: %d\n📅 Дата регистрации: %s\n\n%s\n\n🛣 <b>Маршруты:</b>%s\n\n💰 <b>Тарифы:</b> %s",
-			d.FullName, *d.Phone, d.TelegramID, d.CreatedAt.Format("02.01.2006 15:04"), carInfo, routesStr, tariffsStr)
+			d.FullName, *d.Phone, d.TelegramID, d.CreatedAt.In(moscowLoc).Format("02.01.2006 15:04"), carInfo, routesStr, tariffsStr)
 
 		menu := &tele.ReplyMarkup{}
 		menu.Inline(
@@ -2561,8 +2566,12 @@ func (b *Bot) handleAdminPendingOrders(c tele.Context) error {
 			pickupTimeStr = o.PickupTime.In(time.FixedZone("Europe/Moscow", 3*60*60)).Format("02.01.2006 15:04")
 		}
 
-		msg := fmt.Sprintf("📦 <b>Заказ #%d</b>\n\n👤 Клиент: %s (@%s)\n📞 Телефон: %s\n📊 История: Всего %d | ✅ %d | ❌ %d\n\n📍 Маршрут: %s ➡️ %s\n🚕 Тариф: %s\n👥 Пассажиры: %d\n📅 Время: %s",
-			o.ID, o.ClientUsername, o.ClientUsername, o.ClientPhone, total, completed, cancelled,
+		clientDisplay := o.ClientUsername
+		if clientDisplay == "" {
+			clientDisplay = "Неизвестно"
+		}
+		msg := fmt.Sprintf("📦 <b>Заказ #%d</b>\n\n👤 Клиент: @%s\n📞 Телефон: %s\n📊 История: Всего %d | ✅ %d | ❌ %d\n\n📍 Маршрут: %s ➡️ %s\n🚕 Тариф: %s\n👥 Пассажиры: %d\n📅 Время: %s",
+			o.ID, clientDisplay, o.ClientPhone, total, completed, cancelled,
 			o.FromLocationName, o.ToLocationName, tariffName, o.Passengers, pickupTimeStr)
 
 		menu := &tele.ReplyMarkup{}
@@ -2579,10 +2588,11 @@ func (b *Bot) handleAdminPendingOrders(c tele.Context) error {
 }
 
 func (b *Bot) handleAdminStats(c tele.Context) error {
-	if c.Sender().ID != b.Cfg.AdminID {
+	ctx := context.Background()
+	adm, _ := b.Stg.User().Get(ctx, c.Sender().ID)
+	if adm == nil || adm.Role != "admin" {
 		return nil
 	}
-	ctx := context.Background()
 	totalUsers, _ := b.Stg.User().GetTotalUsers(ctx)
 	totalDrivers, _ := b.Stg.User().GetTotalDrivers(ctx)
 	activeOrders, _ := b.Stg.Order().GetActiveOrdersCount(ctx)
