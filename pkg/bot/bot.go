@@ -321,7 +321,7 @@ func (b *Bot) handleStart(c tele.Context) error {
 	// Handle driver registration flow states
 	if b.Type == BotTypeDriver {
 		switch user.Status {
-		case "pending_signup":
+		case "pending":
 			return b.handleDriverRegistrationStart(c)
 		case "pending_review":
 			return c.Send("⏳ <b>Ваш профиль находится на проверке.</b>\n\nОжидайте уведомления от администратора.", tele.ModeHTML)
@@ -389,8 +389,8 @@ func (b *Bot) handleContact(c tele.Context) error {
 			b.Log.Error("Failed to update role to driver", logger.Error(err), logger.Int64("user_id", c.Sender().ID))
 		}
 		// Do not set active yet, wait for full registration
-		if err := b.Stg.User().UpdateStatus(ctx, c.Sender().ID, "pending_signup"); err != nil {
-			b.Log.Error("Failed to update status to pending_signup", logger.Error(err), logger.Int64("user_id", c.Sender().ID))
+		if err := b.Stg.User().UpdateStatus(ctx, c.Sender().ID, "pending"); err != nil {
+			b.Log.Error("Failed to update status to pending", logger.Error(err), logger.Int64("user_id", c.Sender().ID))
 		}
 	} else {
 		if err := b.Stg.User().UpdateStatus(ctx, c.Sender().ID, "active"); err != nil {
@@ -633,7 +633,7 @@ func (b *Bot) showUsersPage(c tele.Context, page int) error {
 		statusIcon := "✅"
 		if u.Status == "blocked" {
 			statusIcon = "🚫"
-		} else if u.Status == "pending" || u.Status == "pending_signup" || u.Status == "pending_review" {
+		} else if u.Status == "pending" || u.Status == "pending_review" {
 			statusIcon = "⏳"
 		}
 
@@ -1094,6 +1094,9 @@ func (b *Bot) handleCallback(c tele.Context) error {
 	session := b.Sessions[c.Sender().ID]
 	if session == nil {
 		user := b.getCurrentUser(c)
+		if user == nil {
+			return nil
+		}
 		b.Sessions[c.Sender().ID] = &UserSession{DBID: user.ID, State: StateIdle, OrderData: &models.Order{ClientID: user.ID}}
 		session = b.Sessions[c.Sender().ID]
 	}
@@ -1459,7 +1462,7 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		// Faqat ro'yxatdan o'tish jarayonida registration check ishga tushsin
 		user := b.getCurrentUser(c)
 		c.Respond(&tele.CallbackResponse{})
-		if user != nil && (user.Status == "pending_signup" || user.Status == "pending_review") {
+		if user != nil && (user.Status == "pending" || user.Status == "pending_review") {
 			return b.handleRegistrationCheck(c)
 		}
 		// Ro'yxatdan o'tgan driver uchun inline xabarni o'chirib asosiy menuga qaytish
@@ -1471,7 +1474,7 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		// Faqat ro'yxatdan o'tish jarayonida tarif sahifasiga o'tish
 		user := b.getCurrentUser(c)
 		c.Respond(&tele.CallbackResponse{})
-		if user != nil && (user.Status == "pending_signup" || user.Status == "pending_review") {
+		if user != nil && (user.Status == "pending" || user.Status == "pending_review") {
 			return b.handleDriverTariffs(c)
 		}
 		// Ro'yxatdan o'tgan driver uchun inline xabarni o'chirib asosiy menuga qaytish
