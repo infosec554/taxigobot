@@ -263,7 +263,7 @@ func (r *orderRepo) CompleteOrder(ctx context.Context, orderID int64) error {
 }
 
 func (r *orderRepo) CancelOrder(ctx context.Context, orderID int64) error {
-	_, err := r.db.Exec(ctx, "UPDATE orders SET status = 'cancelled' WHERE id = $1 AND status = 'active'", orderID)
+	_, err := r.db.Exec(ctx, "UPDATE orders SET status = 'cancelled' WHERE id = $1 AND status IN ('pending', 'active', 'wait_confirm')", orderID)
 	return err
 }
 
