@@ -318,11 +318,18 @@ func (b *Bot) handleStart(c tele.Context) error {
 
 	// Handle driver registration flow states
 	if b.Type == BotTypeDriver {
-		if user.Status == "pending_signup" {
+		switch user.Status {
+		case "pending_signup":
 			return b.handleDriverRegistrationStart(c)
-		}
-		if user.Status == "pending_review" {
+		case "pending_review":
 			return c.Send("⏳ <b>Ваш профиль находится на проверке.</b>\n\nОжидайте уведомления от администратора.", tele.ModeHTML)
+		case "rejected":
+			return c.Send("❌ <b>Ваша заявка отклонена.</b>\n\nОбратитесь к администратору для уточнения деталей.", tele.ModeHTML)
+		case "active":
+			// OK — ko'rsatish
+		default:
+			// Noma'lum status — contact so'rash
+			return c.Send("⚠️ Нажмите /start и пройдите регистрацию заново.")
 		}
 	}
 
@@ -383,14 +390,15 @@ func (b *Bot) handleContact(c tele.Context) error {
 
 	c.Send(messages["ru"]["registered"], tele.RemoveKeyboard)
 
-	// If it's a driver bot and user is a driver (or just became one), start registration
-	if b.Type == BotTypeDriver && user.Role == "driver" {
-		session := b.Sessions[c.Sender().ID]
-		if session == nil {
+	// Driver botda DOIM registratsiyani boshlash — role DB dan kechikib kelishi mumkin
+	if b.Type == BotTypeDriver {
+		// Sessiyada to'g'ri DBID bo'lishini ta'minlaymiz
+		s := b.Sessions[c.Sender().ID]
+		if s == nil {
 			b.Sessions[c.Sender().ID] = &UserSession{DBID: user.ID, State: StateIdle}
-			session = b.Sessions[c.Sender().ID]
+		} else {
+			s.DBID = user.ID
 		}
-		// Start Driver Registration Flow
 		return b.handleDriverRegistrationStart(c)
 	}
 

@@ -231,15 +231,24 @@ func (b *Bot) handleLicensePlateInput(c tele.Context) error {
 }
 
 func (b *Bot) handleRegistrationCheck(c tele.Context) error {
-	// Check if user has routes and tariffs
+	// Check if user has car profile, routes and tariffs
 	user := b.getCurrentUser(c)
-	routes, _ := b.Stg.Route().GetDriverRoutes(context.Background(), user.ID)
-	enabledTariffs, _ := b.Stg.Tariff().GetEnabled(context.Background(), user.ID)
+	ctx := context.Background()
 
+	// 1. Avtomobil profili tekshiruvi
+	profile, _ := b.Stg.User().GetDriverProfile(ctx, user.ID)
+	if profile == nil || profile.LicensePlate == "" {
+		return c.Send("⚠️ <b>Необходимо заполнить данные автомобиля!</b>\n\nНажмите /start чтобы начать заново.", tele.ModeHTML)
+	}
+
+	// 2. Marshrut tekshiruvi
+	routes, _ := b.Stg.Route().GetDriverRoutes(ctx, user.ID)
 	if len(routes) == 0 {
 		return c.Send("⚠️ <b>Необходимо добавить хотя бы один маршрут!</b>", tele.ModeHTML)
 	}
 
+	// 3. Tarif tekshiruvi
+	enabledTariffs, _ := b.Stg.Tariff().GetEnabled(ctx, user.ID)
 	hasTariff := false
 	for _, v := range enabledTariffs {
 		if v {
@@ -252,14 +261,12 @@ func (b *Bot) handleRegistrationCheck(c tele.Context) error {
 	}
 
 	// Submit for review
-	ctx := context.Background()
 	b.Stg.User().UpdateStatusByID(ctx, user.ID, "pending_review")
 
 	c.Send("🎉 <b>Регистрация завершена!</b>\n\nВаш профиль отправлен на проверку администратору. Ожидайте уведомления.", tele.ModeHTML)
 
 	// Notify Admin
-	// Build details string
-	profile, _ := b.Stg.User().GetDriverProfile(context.Background(), user.ID)
+	// Build details string (profile already fetched above)
 	var carDetails string
 	if profile != nil {
 		carDetails = fmt.Sprintf("🚗 %s %s (%s)", profile.CarBrand, profile.CarModel, profile.LicensePlate)
