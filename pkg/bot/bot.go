@@ -523,6 +523,7 @@ func (b *Bot) handleOrderStart(c tele.Context) error {
 	}
 
 	menu.Inline(rows...)
+	menu.Inline(menu.Row(menu.Data("❌ Отменить", "cl_cancel")))
 	return c.Send(messages["ru"]["order_from"], menu, tele.ModeHTML)
 }
 
@@ -941,7 +942,9 @@ func (b *Bot) handleText(c tele.Context) error {
 		}
 		session.OrderData.Passengers = count
 		session.State = StatePrice
-		return c.Send("💰 <b>Укажите сумму за поездку (RUB):</b>\n\nНапример: <code>1500</code>", tele.ModeHTML)
+		menu := &tele.ReplyMarkup{}
+		menu.Inline(menu.Row(menu.Data("❌ Отменить", "cl_cancel")))
+		return c.Send("💰 <b>Укажите сумму за поездку (RUB):</b>\n\nНапример: <code>1500</code>", menu, tele.ModeHTML)
 	case StatePrice:
 		priceStr := strings.TrimSpace(c.Text())
 		price, err := strconv.Atoi(priceStr)
@@ -1182,6 +1185,7 @@ func (b *Bot) handleCallback(c tele.Context) error {
 			rows = append(rows, menu.Row(currentRow...))
 		}
 		menu.Inline(rows...)
+		menu.Inline(menu.Row(menu.Data("❌ Отменить", "cl_cancel")))
 		c.Respond(&tele.CallbackResponse{})
 		return c.Edit(messages["ru"]["order_to"], menu, tele.ModeHTML)
 	}
@@ -1221,21 +1225,7 @@ func (b *Bot) handleCallback(c tele.Context) error {
 			rows = append(rows, menu.Row(currentRow...))
 		}
 		menu.Inline(rows...)
-
-		// Get location names for temp string display
-		from, _ := b.Stg.Location().GetByID(context.Background(), session.OrderData.FromLocationID)
-		to, _ := b.Stg.Location().GetByID(context.Background(), session.OrderData.ToLocationID)
-
-		fromName := "Неизвестно"
-		if from != nil {
-			fromName = from.Name
-		}
-		toName := "Неизвестно"
-		if to != nil {
-			toName = to.Name
-		}
-
-		session.TempString = fmt.Sprintf("%s ➡️ %s", fromName, toName)
+		menu.Inline(menu.Row(menu.Data("❌ Отменить", "cl_cancel")))
 		return c.Edit(messages["ru"]["order_tariff"], menu)
 	}
 
@@ -1315,6 +1305,7 @@ func (b *Bot) handleCallback(c tele.Context) error {
 			rows = append(rows, menu.Row(currentRow...))
 		}
 		menu.Inline(rows...)
+		menu.Inline(menu.Row(menu.Data("❌ Отменить", "cl_cancel")))
 		c.Respond(&tele.CallbackResponse{})
 		return c.Edit("🕒 Выберите время:", menu)
 	}
@@ -1338,9 +1329,16 @@ func (b *Bot) handleCallback(c tele.Context) error {
 
 	if strings.HasPrefix(data, "cancel_") {
 		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "cancel_"), 10, 64)
-		b.Stg.Order().CancelOrder(context.Background(), id)
-		b.Bot.Edit(c.Callback().Message, "❌ Отменено.")
-		return c.Respond()
+		rows, err := b.Stg.Order().CancelOrder(context.Background(), id)
+		if err != nil || rows == 0 {
+			return c.Respond(&tele.CallbackResponse{Text: "❌ Невозможно отменить. Возможно, заказ уже принят."})
+		}
+		c.Respond(&tele.CallbackResponse{Text: "Заказ отменен"})
+		return c.Edit("❌ <b>Заказ отменен.</b>", tele.ModeHTML)
+	}
+
+	if data == "cl_cancel" {
+		return b.resetOrderFlow(c)
 	}
 
 	if strings.HasPrefix(data, "return_order_") {
@@ -1417,14 +1415,14 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		return nil
 	}
 
-	if strings.HasPrefix(data, "sc_cal_") {
-		dateStr := strings.TrimPrefix(data, "sc_cal_")
-		return b.handleDriverDateSearch(c, dateStr)
-	}
-
 	if strings.HasPrefix(data, "sc_cal_all_") {
 		dateStr := strings.TrimPrefix(data, "sc_cal_all_")
 		return b.handleDriverDateSearchAll(c, dateStr)
+	}
+
+	if strings.HasPrefix(data, "sc_cal_") {
+		dateStr := strings.TrimPrefix(data, "sc_cal_")
+		return b.handleDriverDateSearch(c, dateStr)
 	}
 
 	// Route Admin Moderation and Pagination callbacks
@@ -1553,6 +1551,9 @@ func (b *Bot) handleCallback(c tele.Context) error {
 				b.Log.Warning("Invalid order data in session for confirm_yes", logger.Int64("user_id", c.Sender().ID))
 				return c.Send("⚠️ <b>Ошибка:</b> Данные заказа не найдены. Пожалуйста, нажмите /start и оформите заказ заново.", tele.ModeHTML)
 			}
+			if session.State != StateConfirm {
+				return c.Respond(&tele.CallbackResponse{Text: "❌ Сессия устарела."})
+			}
 
 			// Get client info for order
 			client, _ := b.Stg.User().GetByID(context.Background(), session.DBID)
@@ -1611,9 +1612,7 @@ func (b *Bot) handleCallback(c tele.Context) error {
 			session.State = StateIdle
 			return b.showMenu(c, b.getCurrentUser(c))
 		case "confirm_no":
-			session.State = StateIdle
-			c.Send("❌ Отменено.")
-			return b.showMenu(c, b.getCurrentUser(c))
+			return b.resetOrderFlow(c)
 		}
 	}
 
@@ -2098,6 +2097,19 @@ func (b *Bot) notifyDriverSpecific(driverID int64, text string) {
 			target.Sessions[teleID] = &UserSession{DBID: driverID, State: StateIdle}
 		}
 	}
+}
+
+func (b *Bot) resetOrderFlow(c tele.Context) error {
+	session := b.Sessions[c.Sender().ID]
+	if session != nil {
+		session.State = StateIdle
+		session.OrderData = &models.Order{ClientID: session.DBID}
+		session.TempString = ""
+	}
+	c.Respond(&tele.CallbackResponse{Text: "Отменено"})
+	c.Edit("❌ <b>Заказ отменен.</b>", tele.ModeHTML)
+	user := b.getCurrentUser(c)
+	return b.showMenu(c, user)
 }
 
 func (b *Bot) notifyUser(dbID int64, text string) {

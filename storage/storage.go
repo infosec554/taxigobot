@@ -55,7 +55,7 @@ type IOrderStorage interface {
 	SetOrderArrived(ctx context.Context, orderID int64) error
 	SetOrderInProgress(ctx context.Context, orderID int64) error
 	CompleteOrder(ctx context.Context, orderID int64) error
-	CancelOrder(ctx context.Context, orderID int64) error
+	CancelOrder(ctx context.Context, orderID int64) (int64, error)
 	UpdateStatus(ctx context.Context, id int64, status string) error
 	GetPendingOrders(ctx context.Context) ([]*models.Order, error)
 	GetActiveOrdersCount(ctx context.Context) (int, error)

@@ -185,15 +185,11 @@ func (r *orderRepo) GetOrdersByDate(ctx context.Context, date time.Time, driverI
 		FROM orders o
 		LEFT JOIN locations fl ON o.from_location_id = fl.id
 		LEFT JOIN locations tl ON o.to_location_id = tl.id
-		JOIN driver_routes dr ON (o.from_location_id = dr.from_location_id AND o.to_location_id = dr.to_location_id)
-		JOIN driver_tariffs dt ON (o.tariff_id = dt.tariff_id)
 		WHERE o.status = 'active'
 		  AND o.pickup_time::date = $1::date
-		  AND dr.driver_id = $2
-		  AND dt.driver_id = $2
 		ORDER BY o.pickup_time ASC
 	`
-	return r.scanOrders(ctx, query, date, driverID)
+	return r.scanOrders(ctx, query, date)
 }
 
 func (r *orderRepo) RequestOrder(ctx context.Context, orderID int64, driverID int64) error {
@@ -262,9 +258,12 @@ func (r *orderRepo) CompleteOrder(ctx context.Context, orderID int64) error {
 	return err
 }
 
-func (r *orderRepo) CancelOrder(ctx context.Context, orderID int64) error {
-	_, err := r.db.Exec(ctx, "UPDATE orders SET status = 'cancelled' WHERE id = $1 AND status IN ('pending', 'active', 'wait_confirm')", orderID)
-	return err
+func (r *orderRepo) CancelOrder(ctx context.Context, orderID int64) (int64, error) {
+	res, err := r.db.Exec(ctx, "UPDATE orders SET status = 'cancelled' WHERE id = $1 AND status IN ('pending', 'active', 'wait_confirm')", orderID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected(), nil
 }
 
 func (r *orderRepo) UpdateStatus(ctx context.Context, id int64, status string) error {
