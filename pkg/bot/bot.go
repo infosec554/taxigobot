@@ -523,8 +523,8 @@ func (b *Bot) handleOrderStart(c tele.Context) error {
 		rows = append(rows, menu.Row(currentRow...))
 	}
 
+	rows = append(rows, menu.Row(menu.Data("❌ Отменить", "cl_cancel")))
 	menu.Inline(rows...)
-	menu.Inline(menu.Row(menu.Data("❌ Отменить", "cl_cancel")))
 	return c.Send(messages["ru"]["order_from"], menu, tele.ModeHTML)
 }
 
@@ -1297,8 +1297,8 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		if len(currentRow) > 0 {
 			rows = append(rows, menu.Row(currentRow...))
 		}
+		rows = append(rows, menu.Row(menu.Data("❌ Отменить", "cl_cancel")))
 		menu.Inline(rows...)
-		menu.Inline(menu.Row(menu.Data("❌ Отменить", "cl_cancel")))
 		c.Respond(&tele.CallbackResponse{})
 		return c.Edit(messages["ru"]["order_to"], menu, tele.ModeHTML)
 	}
@@ -1337,8 +1337,8 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		if len(currentRow) > 0 {
 			rows = append(rows, menu.Row(currentRow...))
 		}
+		rows = append(rows, menu.Row(menu.Data("❌ Отменить", "cl_cancel")))
 		menu.Inline(rows...)
-		menu.Inline(menu.Row(menu.Data("❌ Отменить", "cl_cancel")))
 		return c.Edit(messages["ru"]["order_tariff"], menu)
 	}
 
@@ -1417,8 +1417,8 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		if len(currentRow) > 0 {
 			rows = append(rows, menu.Row(currentRow...))
 		}
+		rows = append(rows, menu.Row(menu.Data("❌ Отменить", "cl_cancel")))
 		menu.Inline(rows...)
-		menu.Inline(menu.Row(menu.Data("❌ Отменить", "cl_cancel")))
 		c.Respond(&tele.CallbackResponse{})
 		return c.Edit("🕒 Выберите время:", menu)
 	}
