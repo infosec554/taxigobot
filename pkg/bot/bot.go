@@ -1534,6 +1534,7 @@ func (b *Bot) handleCallback(c tele.Context) error {
 		strings.HasPrefix(data, "approve_match_") ||
 		strings.HasPrefix(data, "reject_match_") ||
 		strings.HasPrefix(data, "car_addmodel_") ||
+		strings.HasPrefix(data, "adm_set_price_") ||
 		strings.HasPrefix(data, "unblock_")
 
 	if isAdminCallback {
@@ -1951,12 +1952,7 @@ func (b *Bot) handleAdminCallbacks(c tele.Context, data string) error {
 
 	// Order Moderation (From Notifications)
 	if strings.HasPrefix(data, "approve_order_") {
-		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "approve_order_"), 10, 64)
-		b.Log.Info("Admin approving order",
-			logger.Int64("admin_id", c.Sender().ID),
-			logger.Int64("order_id", id),
-		)
-		return b.approveOrderByAdmin(c, id, "")
+		return c.Respond(&tele.CallbackResponse{Text: "❌ Пожалуйста, используйте кнопку 'Назначить цену'"})
 	}
 	if strings.HasPrefix(data, "reject_order_") {
 		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "reject_order_"), 10, 64)
@@ -3051,7 +3047,7 @@ func (b *Bot) handleAdminPendingOrders(c tele.Context) error {
 		menu := &tele.ReplyMarkup{}
 		menu.Inline(
 			menu.Row(
-				menu.Data(ru["admin_btn_confirm_order"], fmt.Sprintf("approve_order_%d", o.ID)),
+				menu.Data("💰 Назначить цену", fmt.Sprintf("adm_set_price_%d", o.ID)),
 				menu.Data(ru["admin_btn_reject_order"], fmt.Sprintf("reject_order_%d", o.ID)),
 			),
 			menu.Row(menu.Data(ru["admin_btn_block_client"], fmt.Sprintf("block_user_%d", o.ClientID))),
