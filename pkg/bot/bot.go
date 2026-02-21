@@ -529,6 +529,9 @@ func (b *Bot) handleOrderStart(c tele.Context) error {
 
 func (b *Bot) handleActiveOrders(c tele.Context) error {
 	user := b.getCurrentUser(c)
+	if user == nil {
+		return c.Send("❌ Ошибка: Информация о пользователе не найдена. Пожалуйста, нажмите /start еще раз.")
+	}
 	if user.Status != "active" {
 		return c.Send("🚫 <b>Доступ запрещен!</b>\n\nВаш профиль находится на проверке или заблокирован. Ожидайте подтверждения администратора.", tele.ModeHTML)
 	}
@@ -557,6 +560,9 @@ func (b *Bot) handleActiveOrders(c tele.Context) error {
 
 func (b *Bot) handleMyOrdersDriver(c tele.Context) error {
 	user := b.getCurrentUser(c)
+	if user == nil {
+		return c.Send("❌ Ошибка: Информация о пользователе не найдена. Пожалуйста, нажмите /start еще раз.")
+	}
 	if user.Status != "active" && user.Status != "pending_review" {
 		return c.Send("🚫 <b>Доступ запрещен!</b>\n\nВаш профиль находится на проверке или заблокирован. Ожидайте подтверждения администратора.", tele.ModeHTML)
 	}
@@ -770,6 +776,9 @@ func (b *Bot) handleAdminTariffs(c tele.Context) error {
 	session := b.Sessions[c.Sender().ID]
 	if session == nil {
 		user := b.getCurrentUser(c)
+		if user == nil {
+			return c.Send("❌ Ошибка: Информация о пользователе не найдена. Пожалуйста, нажмите /start еще раз.")
+		}
 		b.Sessions[c.Sender().ID] = &UserSession{DBID: user.ID, State: StateIdle}
 		session = b.Sessions[c.Sender().ID]
 	}
@@ -850,6 +859,9 @@ func (b *Bot) handleAdminLocations(c tele.Context) error {
 	session := b.Sessions[c.Sender().ID]
 	if session == nil {
 		user := b.getCurrentUser(c)
+		if user == nil {
+			return c.Send("❌ Ошибка: Информация о пользователе не найдена. Пожалуйста, нажмите /start еще раз.")
+		}
 		b.Sessions[c.Sender().ID] = &UserSession{DBID: user.ID, State: StateIdle}
 		session = b.Sessions[c.Sender().ID]
 	}
@@ -990,6 +1002,9 @@ func (b *Bot) handleText(c tele.Context) error {
 	case StateCarModelOther:
 		if session.DriverProfile == nil {
 			user := b.getCurrentUser(c)
+			if user == nil {
+				return c.Send("❌ Ошибка: Информация о пользователе не найдена. Пожалуйста, нажмите /start еще раз.")
+			}
 			session.DriverProfile = &models.DriverProfile{UserID: user.ID}
 		}
 		session.DriverProfile.CarModel = c.Text()
@@ -1097,6 +1112,9 @@ func (b *Bot) handleText(c tele.Context) error {
 			b.Stg.User().UpdateRole(context.Background(), c.Sender().ID, "admin")
 			session.State = StateIdle
 			user, _ := b.Stg.User().Get(context.Background(), c.Sender().ID)
+			if user == nil {
+				return c.Send("❌ Ошибка: Пользователь не найден. Пожалуйста, нажмите /start еще раз.")
+			}
 			return b.showMenu(c, user)
 		}
 		return c.Send("❌ Пароль неверный. Попробуйте еще раз:")
