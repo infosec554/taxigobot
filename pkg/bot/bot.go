@@ -1021,46 +1021,6 @@ func (b *Bot) handleText(c tele.Context) error {
 			menu.Row(menu.Data("❌ Отменить", "cl_cancel")),
 		)
 		return c.Send(msg, menu, tele.ModeHTML)
-	case StatePrice:
-		priceStr := strings.TrimSpace(c.Text())
-		price, err := strconv.Atoi(priceStr)
-		if err != nil || price <= 0 {
-			return c.Send("❌ Неверный формат. Введите сумму числом (например: <code>1500</code>).", tele.ModeHTML)
-		}
-		session.OrderData.Price = price
-		session.State = StateConfirm
-
-		from, _ := b.Stg.Location().GetByID(context.Background(), session.OrderData.FromLocationID)
-		to, _ := b.Stg.Location().GetByID(context.Background(), session.OrderData.ToLocationID)
-		tariff, _ := b.Stg.Tariff().GetByID(context.Background(), session.OrderData.TariffID)
-
-		fromName, toName, tariffName := "Неизвестно", "Неизвестно", "Неизвестно"
-		if from != nil {
-			fromName = from.Name
-		}
-		if to != nil {
-			toName = to.Name
-		}
-		if tariff != nil {
-			tariffName = tariff.Name
-		}
-
-		timeStr := "Неизвестно"
-		if session.OrderData.PickupTime != nil {
-			loc := time.FixedZone("Europe/Moscow", 3*60*60)
-			timeStr = session.OrderData.PickupTime.In(loc).Format("02.01.2006 15:04")
-		}
-
-		msg := fmt.Sprintf(
-			"<b>✅ Подтверждение заказа</b>\n\n📍 <b>%s ➡️ %s</b>\n🚕 Тариф: <b>%s</b>\n👥 Пассажиры: <b>%d</b>\n💰 Сумма: <b>%d RUB</b>\n📅 Время: <b>%s</b>\n\nПодтверждаете?",
-			fromName, toName, tariffName, session.OrderData.Passengers, price, timeStr,
-		)
-		menu := &tele.ReplyMarkup{}
-		menu.Inline(menu.Row(
-			menu.Data("✅ Подтвердить", "confirm_yes"),
-			menu.Data("❌ Отменить", "confirm_no"),
-		))
-		return c.Send(msg, menu, tele.ModeHTML)
 	case StateLicensePlate:
 		return b.handleLicensePlateInput(c)
 	case StateCarModelOther:
@@ -1788,9 +1748,48 @@ func (b *Bot) handleCallback(c tele.Context) error {
 	if b.Type == BotTypeClient && strings.HasPrefix(data, "pass_") {
 		count, _ := strconv.Atoi(strings.TrimPrefix(data, "pass_"))
 		session.OrderData.Passengers = count
-		session.State = StatePrice
+		session.State = StateConfirm
+
+		from, _ := b.Stg.Location().GetByID(context.Background(), session.OrderData.FromLocationID)
+		to, _ := b.Stg.Location().GetByID(context.Background(), session.OrderData.ToLocationID)
+		tariff, _ := b.Stg.Tariff().GetByID(context.Background(), session.OrderData.TariffID)
+
+		fromName, toName, tariffName := "Неизвестно", "Неизвестно", "Неизвестно"
+		if from != nil {
+			fromName = from.Name
+		}
+		if to != nil {
+			toName = to.Name
+		}
+		if tariff != nil {
+			tariffName = tariff.Name
+		}
+
+		timeStr := "Неизвестно"
+		if session.OrderData.PickupTime != nil {
+			loc := time.FixedZone("Europe/Moscow", 3*60*60)
+			timeStr = session.OrderData.PickupTime.In(loc).Format("02.01.2006 15:04")
+		}
+
+		msg := fmt.Sprintf(
+			"✅ <b>Проверьте данные заказа:</b>\n\n"+
+				"📍 Откуда: <b>%s</b>\n"+
+				"🏁 Куда: <b>%s</b>\n"+
+				"🚕 Тариф: <b>%s</b>\n"+
+				"👥 Пассажиры: <b>%d</b>\n"+
+				"📅 Время: <b>%s</b>\n\n"+
+				"<i>Цена будет назначена администратором после подтверждения.</i>",
+			fromName, toName, tariffName, session.OrderData.Passengers, timeStr,
+		)
+
+		menu := &tele.ReplyMarkup{}
+		menu.Inline(
+			menu.Row(menu.Data("✅ Подтвердить", "confirm_yes")),
+			menu.Row(menu.Data("❌ Отменить", "cl_cancel")),
+		)
+
 		c.Respond(&tele.CallbackResponse{})
-		return c.Edit("💰 <b>Укажите сумму за поездку (RUB):</b>\n\nНапример: <code>1500</code>", tele.ModeHTML)
+		return c.Edit(msg, menu, tele.ModeHTML)
 	}
 
 	return nil
