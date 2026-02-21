@@ -1347,10 +1347,26 @@ func (b *Bot) handleCallback(c tele.Context) error {
 
 	if strings.HasPrefix(data, "cancel_") {
 		id, _ := strconv.ParseInt(strings.TrimPrefix(data, "cancel_"), 10, 64)
+		order, _ := b.Stg.Order().GetByID(context.Background(), id)
+		oldStatus := ""
+		if order != nil {
+			oldStatus = order.Status
+		}
+
 		rows, err := b.Stg.Order().CancelOrder(context.Background(), id)
 		if err != nil || rows == 0 {
 			return c.Respond(&tele.CallbackResponse{Text: "❌ Невозможно отменить. Возможно, заказ уже принят."})
 		}
+
+		// Notify Admin if it was still in pending/active
+		if oldStatus == "pending" || oldStatus == "active" {
+			b.notifyAdmin(id, fmt.Sprintf("⚠️ <b>Заказ #%d отменен клиентом.</b>", id))
+		}
+		// Notify Driver if it was already wait_confirm or taken
+		if (oldStatus == "wait_confirm" || oldStatus == "taken") && order.DriverID != nil {
+			b.notifyUser(*order.DriverID, fmt.Sprintf("❌ <b>Заказ #%d, который вы выбрали, отменен клиентом.</b>", id))
+		}
+
 		c.Respond(&tele.CallbackResponse{Text: "Заказ отменен"})
 		return c.Edit("❌ <b>Заказ отменен.</b>", tele.ModeHTML)
 	}
@@ -1926,7 +1942,23 @@ func (b *Bot) handleAdminCallbacks(c tele.Context, data string) error {
 		orderID, _ := strconv.ParseInt(parts[0], 10, 64)
 		page, _ := strconv.Atoi(parts[1])
 
-		b.Stg.Order().CancelOrder(context.Background(), orderID)
+		order, _ := b.Stg.Order().GetByID(context.Background(), orderID)
+		if order == nil {
+			return c.Respond(&tele.CallbackResponse{Text: "Заказ не найден"})
+		}
+
+		rows, _ := b.Stg.Order().CancelOrder(context.Background(), orderID)
+		if rows > 0 {
+			// Notify Client
+			b.notifyUser(order.ClientID, fmt.Sprintf("❌ <b>Ваш заказ #%d отменен модератором.</b>", orderID))
+			// Notify Driver if any
+			if order.DriverID != nil {
+				b.notifyUser(*order.DriverID, fmt.Sprintf("❌ <b>Заказ #%d отменен модератором.</b>", orderID))
+			}
+			c.Respond(&tele.CallbackResponse{Text: "Заказ отменен"})
+		} else {
+			c.Respond(&tele.CallbackResponse{Text: "Не удалось отменить (уже завершен?)"})
+		}
 		return b.showOrdersPage(c, page)
 	}
 
@@ -2048,6 +2080,11 @@ func (b *Bot) approveOrderByAdmin(c tele.Context, orderID int64, successMsg stri
 	if order == nil {
 		c.Edit("❌ Заказ не найден.")
 		return c.Respond(&tele.CallbackResponse{Text: "Заказ не найден"})
+	}
+
+	if order.Status != "pending" {
+		c.Edit(fmt.Sprintf("❌ Невозможно подтвердить. Текущий статус: %s", order.Status))
+		return c.Respond(&tele.CallbackResponse{Text: "Заказ уже не в ожидании"})
 	}
 
 	order.Status = "active"
@@ -2347,7 +2384,7 @@ func (b *Bot) handleMyOrders(c tele.Context) error {
 			o.ID, o.FromLocationName, o.ToLocationName, o.Passengers, timeStr, o.Status)
 
 		menu := &tele.ReplyMarkup{}
-		if o.Status == "active" || o.Status == "pending" || o.Status == "wait_confirm" {
+		if o.Status == "active" || o.Status == "pending" || o.Status == "wait_confirm" || o.Status == "taken" || o.Status == "on_way" {
 			menu.Inline(menu.Row(menu.Data("❌ Отменить", fmt.Sprintf("cancel_%d", o.ID))))
 		}
 		c.Send(txt, menu, tele.ModeHTML)
