@@ -3,7 +3,6 @@ package bot
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 	"taxibot/pkg/logger"
 	"taxibot/pkg/models"
@@ -11,8 +10,7 @@ import (
 	tele "gopkg.in/telebot.v3"
 )
 
-// Regex for Russian license plates: 1 letter, 3 digits, 2 letters, 2-3 digits
-var licensePlateRegex = regexp.MustCompile(`^[АВЕКМНОРСТУХ]{1}[0-9]{3}[АВЕКМНОРСТУХ]{2}[0-9]{2,3}$`)
+// licensePlateRegex is removed to support diverse plate formats (e.g. temporary, transit, non-standard)
 
 func normalizeLicensePlate(input string) string {
 	mapping := map[rune]rune{
@@ -194,7 +192,7 @@ func (b *Bot) handleCarModelSelection(c tele.Context, modelID int64) error {
 	}
 
 	session.State = StateLicensePlate
-	return c.Edit("🔢 <b>Введите гос. номер автомобиля:</b>\n\nПример: <code>A123BC777</code> (русские буквы)", tele.ModeHTML)
+	return c.Edit("🔢 <b>Введите гос. номер автомобиля:</b>\n\nПример: <code>A123BC777</code>\n<i>(Можно использовать любой удобный формат)</i>", tele.ModeHTML)
 }
 
 func (b *Bot) handleCarModelOther(c tele.Context) error {
@@ -207,9 +205,9 @@ func (b *Bot) handleLicensePlateInput(c tele.Context) error {
 	plate := strings.ToUpper(strings.TrimSpace(c.Text()))
 	plate = normalizeLicensePlate(plate)
 
-	// Validate
-	if !licensePlateRegex.MatchString(plate) {
-		return c.Send("❌ <b>Некорректный формат!</b>\n\nИспользуйте формат: <code>A123BC777</code> (Кириллица, 8-9 символов).", tele.ModeHTML)
+	// Validation removed as requested to support all formats
+	if len(plate) < 2 {
+		return c.Send("❌ <b>Слишком короткий номер!</b>\nПожалуйста, введите корректный номер автомобиля.", tele.ModeHTML)
 	}
 
 	session := b.Sessions[c.Sender().ID]
@@ -258,6 +256,11 @@ func (b *Bot) handleRegistrationCheck(c tele.Context) error {
 	}
 	if !hasTariff {
 		return c.Send("⚠️ <b>Необходимо выбрать хотя бы один тариф!</b>", tele.ModeHTML)
+	}
+
+	// Check if already pending to avoid spam
+	if user.Status == "pending_review" {
+		return c.Send("⏳ <b>Ваш профиль уже находится на проверке.</b>\nПожалуйста, дождитесь решения администратора.", tele.ModeHTML)
 	}
 
 	// Submit for review

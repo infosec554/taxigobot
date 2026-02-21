@@ -68,7 +68,7 @@ func main() {
 	// 7. Initialize Web Server (Mini App API & Static)
 	go func() {
 		log.Info(fmt.Sprintf("🚀 Web Server is starting on :%d...", cfg.AppPort))
-		if err := bot.RunServer(&cfg, pgStore, log); err != nil {
+		if err := bot.RunServer(&cfg, pgStore, log, clientBot.HandlePaymentSuccess); err != nil {
 			log.Error("Failed to start web server", logger.Error(err))
 		}
 	}()

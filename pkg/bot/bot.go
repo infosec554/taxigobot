@@ -69,7 +69,8 @@ const (
 	StateCarModelOther = "awaiting_car_model_other"
 	StateLicensePlate  = "awaiting_license_plate"
 
-	StatePrice = "awaiting_price"
+	StatePrice         = "awaiting_price"
+	StateAdminSetPrice = "awaiting_admin_set_price"
 )
 
 func (b *Bot) handleWebApp(c tele.Context) error {
@@ -742,11 +743,17 @@ func (b *Bot) showOrdersPage(c tele.Context, page int) error {
 
 		total, completed, cancelled, _ := b.Stg.Order().GetClientStats(context.Background(), o.ClientID)
 
-		msg.WriteString(fmt.Sprintf("🔹 <b>#%d</b> | %s\n📍 %s -> %s\n💰 %d %s\n📊 История: Всего %d | ✅ %d | ❌ %d\n\n",
-			o.ID, o.Status, o.FromLocationName, o.ToLocationName, o.Price, o.Currency, total, completed, cancelled))
+		statusName := b.GetStatusLabel(o.Status)
 
-		if o.Status != "completed" && o.Status != "cancelled" {
-			rows = append(rows, menu.Row(menu.Data(fmt.Sprintf("❌ Отменить #%d", o.ID), fmt.Sprintf("adm_cancel_%d_%d", o.ID, page))))
+		msg.WriteString(fmt.Sprintf("🔹 <b>#%d</b> | %s\n📍 %s -> %s\n💰 %d %s\n👤 Клиент: %s (%s)\n📊 История: Всего %d | ✅ %d | ❌ %d\n\n",
+			o.ID, statusName, o.FromLocationName, o.ToLocationName, o.Price, o.Currency, o.ClientUsername, o.ClientPhone, total, completed, cancelled))
+
+		if o.Status == "pending" {
+			rows = append(rows, menu.Row(menu.Data(fmt.Sprintf("💰 Назначить цену #%d", o.ID), fmt.Sprintf("adm_set_price_%d", o.ID))))
+		}
+
+		if o.Status != "completed" && o.Status != "cancelled" && o.Status != "cancelled_by_admin" {
+			rows = append(rows, menu.Row(menu.Data(fmt.Sprintf("❌ Отклонить #%d", o.ID), fmt.Sprintf("adm_cancel_%d_%d", o.ID, page))))
 		}
 	}
 
@@ -895,6 +902,27 @@ func (b *Bot) handleAdminLocations(c tele.Context) error {
 	return c.Send(msg.String(), menu, tele.ModeHTML)
 }
 
+func (b *Bot) GetStatusLabel(status string) string {
+	statusMap := map[string]string{
+		"pending":            "⌛ Ожидает цену",
+		"wait_payment":       "💰 Ожидает оплаты",
+		"active":             "🔍 Поиск водителя",
+		"wait_confirm":       "⏳ Ожидает подтверждения",
+		"taken":              "🚕 Водитель принял",
+		"on_way":             "🚀 Водитель едет",
+		"arrived":            "📍 Водитель на месте",
+		"in_progress":        "🚙 В пути",
+		"completed":          "✅ Завершен",
+		"cancelled":          "❌ Отменен",
+		"cancelled_by_admin": "🚫 Отменен администратором",
+	}
+
+	if name, ok := statusMap[status]; ok {
+		return name
+	}
+	return status
+}
+
 func (b *Bot) handleText(c tele.Context) error {
 	b.Log.Info("Handle Text", logger.String("text", c.Text()))
 
@@ -953,10 +981,46 @@ func (b *Bot) handleText(c tele.Context) error {
 			return c.Send("❌ Пожалуйста, введите корректное число пассажиров (например: 2).")
 		}
 		session.OrderData.Passengers = count
-		session.State = StatePrice
+		session.State = StateConfirm
+
+		from, _ := b.Stg.Location().GetByID(context.Background(), session.OrderData.FromLocationID)
+		to, _ := b.Stg.Location().GetByID(context.Background(), session.OrderData.ToLocationID)
+		tariff, _ := b.Stg.Tariff().GetByID(context.Background(), session.OrderData.TariffID)
+
+		fromName, toName, tariffName := "Неизвестно", "Неизвестно", "Неизвестно"
+		if from != nil {
+			fromName = from.Name
+		}
+		if to != nil {
+			toName = to.Name
+		}
+		if tariff != nil {
+			tariffName = tariff.Name
+		}
+
+		timeStr := "Неизвестно"
+		if session.OrderData.PickupTime != nil {
+			loc := time.FixedZone("Europe/Moscow", 3*60*60)
+			timeStr = session.OrderData.PickupTime.In(loc).Format("02.01.2006 15:04")
+		}
+
+		msg := fmt.Sprintf(
+			"✅ <b>Проверьте данные заказа:</b>\n\n"+
+				"📍 Откуда: <b>%s</b>\n"+
+				"🏁 Куда: <b>%s</b>\n"+
+				"🚕 Тариф: <b>%s</b>\n"+
+				"👥 Пассажиры: <b>%d</b>\n"+
+				"📅 Время: <b>%s</b>\n\n"+
+				"<i>Цена будет назначена администратором после подтверждения.</i>",
+			fromName, toName, tariffName, session.OrderData.Passengers, timeStr,
+		)
+
 		menu := &tele.ReplyMarkup{}
-		menu.Inline(menu.Row(menu.Data("❌ Отменить", "cl_cancel")))
-		return c.Send("💰 <b>Укажите сумму за поездку (RUB):</b>\n\nНапример: <code>1500</code>", menu, tele.ModeHTML)
+		menu.Inline(
+			menu.Row(menu.Data("✅ Подтвердить", "confirm_yes")),
+			menu.Row(menu.Data("❌ Отменить", "cl_cancel")),
+		)
+		return c.Send(msg, menu, tele.ModeHTML)
 	case StatePrice:
 		priceStr := strings.TrimSpace(c.Text())
 		price, err := strconv.Atoi(priceStr)
@@ -1098,6 +1162,37 @@ func (b *Bot) handleText(c tele.Context) error {
 		}
 		session.State = StateIdle
 		return c.Send(fmt.Sprintf("🔍 <b>Информация о городе:</b>\n\n🆔 ID: %d\n📍 Название: %s", location.ID, location.Name), tele.ModeHTML)
+	case StateAdminSetPrice:
+		orderID, _ := strconv.ParseInt(session.TempString, 10, 64)
+		price, err := strconv.Atoi(strings.TrimSpace(c.Text()))
+		if err != nil || price <= 0 {
+			return c.Send("❌ Пожалуйста, введите корректное число (например: 1500).")
+		}
+
+		// Update order price in DB
+		if _, err := b.DB.Exec(context.Background(), "UPDATE orders SET price = $1, status = 'wait_payment' WHERE id = $2", price, orderID); err != nil {
+			return c.Send("❌ Ошибка при обновлении цены.")
+		}
+
+		session.State = StateIdle
+		session.TempString = ""
+
+		// Notify client about the price and send payment link
+		order, _ := b.Stg.Order().GetByID(context.Background(), orderID)
+		if order != nil {
+			// In a real app, you'd call CloudPayments API here to get a real link
+			paymentLink := fmt.Sprintf("https://checkout.cloudpayments.ru/pay/%s?amount=%d&orderId=%d", b.Cfg.CPPublicID, price, orderID)
+
+			msg := fmt.Sprintf("💰 <b>Администратор назначил цену для вашего заказа #%d</b>\n\n"+
+				"💵 Сумма: <b>%d RUB</b>\n\n"+
+				"Пожалуйста, оплатите заказ для его активации:", orderID, price)
+
+			menu := &tele.ReplyMarkup{}
+			menu.Inline(menu.Row(menu.URL("💳 Оплатить", paymentLink)))
+
+			b.notifyUserWithOptions(order.ClientID, msg, menu, tele.ModeHTML)
+		}
+		return c.Send("✅ Цена установлена. Клиенту отправлена ссылка на оплату.")
 	case StateAdminLogin:
 		// Admin login: check username
 		if c.Text() == b.Cfg.AdminLogin {
@@ -1634,8 +1729,8 @@ func (b *Bot) handleCallback(c tele.Context) error {
 					clientTeleID = client.TelegramID
 				}
 
-				adminMsg := fmt.Sprintf("🔔 <b>НОВЫЙ ЗАКАЗ (На утверждение)</b>\n\n🆔 #%d\n📍 %s ➡️ %s\n💰 Цена: %d %s\n👥 Пассажиры: %d\n📅 Время: %s\n\n👤 Клиент: <a href=\"tg://user?id=%d\">%s</a>\n📞 Тел: %s",
-					order.ID, fromName, toName, order.Price, order.Currency, order.Passengers, timeStr, clientTeleID, clientName, order.ClientPhone)
+				adminMsg := fmt.Sprintf("🔔 <b>НОВЫЙ ЗАКАЗ (Ожидает цену)</b>\n\n🆔 #%d\n📍 %s ➡️ %s\n💰 Цена: <b>Ожидает назначения</b>\n👥 Пассажиры: %d\n📅 Время: %s\n\n👤 Клиент: <a href=\"tg://user?id=%d\">%s</a>\n📞 Тел: %s",
+					order.ID, fromName, toName, order.Passengers, timeStr, clientTeleID, clientName, order.ClientPhone)
 
 				b.notifyAdmin(order.ID, adminMsg)
 				c.Send("⏳ Ваш заказ отправлен администратору. Ожидайте подтверждения.")
@@ -1778,6 +1873,24 @@ func (b *Bot) handleAdminCallbacks(c tele.Context, data string) error {
 		b.Stg.User().UpdateStatusByID(context.Background(), userDBID, "active")
 		c.Edit(c.Callback().Message, c.Callback().Message.Text+"\n\n✅ <b>Разблокирован</b>", tele.ModeHTML)
 		return c.Respond(&tele.CallbackResponse{Text: "Разблокировано"})
+	}
+
+	if strings.HasPrefix(data, "adm_set_price_") {
+		orderID, _ := strconv.ParseInt(strings.TrimPrefix(data, "adm_set_price_"), 10, 64)
+		order, _ := b.Stg.Order().GetByID(context.Background(), orderID)
+		if order != nil && order.Status != "pending" {
+			label := b.GetStatusLabel(order.Status)
+			return c.Respond(&tele.CallbackResponse{Text: fmt.Sprintf("❌ Заказ уже в статусе: %s", label)})
+		}
+		session := b.Sessions[c.Sender().ID]
+		if session == nil {
+			session = &UserSession{State: StateIdle}
+			b.Sessions[c.Sender().ID] = session
+		}
+		session.State = StateAdminSetPrice
+		session.TempString = strconv.FormatInt(orderID, 10)
+		_ = c.Respond(&tele.CallbackResponse{Text: "Введите цену"})
+		return c.Send(fmt.Sprintf("💰 <b>Укажите стоимость поездки для заказа #%d (RUB):</b>\n\nПросто отправьте число, например: <code>1500</code>", orderID), tele.ModeHTML)
 	}
 
 	if strings.HasPrefix(data, "set_role_") {
@@ -2082,8 +2195,9 @@ func (b *Bot) approveOrderByAdmin(c tele.Context, orderID int64, successMsg stri
 		return c.Respond(&tele.CallbackResponse{Text: "Заказ не найден"})
 	}
 
+	statusLabel := b.GetStatusLabel(order.Status)
 	if order.Status != "pending" {
-		c.Edit(fmt.Sprintf("❌ Невозможно подтвердить. Текущий статус: %s", order.Status))
+		c.Edit(fmt.Sprintf("❌ Невозможно подтвердить. Текущий статус: %s", statusLabel))
 		return c.Respond(&tele.CallbackResponse{Text: "Заказ уже не в ожидании"})
 	}
 
@@ -2168,28 +2282,75 @@ func (b *Bot) resetOrderFlow(c tele.Context) error {
 }
 
 func (b *Bot) notifyUser(dbID int64, text string) {
+	b.notifyUserWithOptions(dbID, text)
+}
+
+func (b *Bot) notifyUserWithOptions(dbID int64, text string, opt ...interface{}) {
 	target := b
 	if b.Type != BotTypeClient {
 		if p, ok := b.Peers[BotTypeClient]; ok {
 			target = p
 		} else {
-			b.Log.Error("Client bot peer not found for notification")
 			return
 		}
 	}
 	var teleID int64
 	b.DB.QueryRow(context.Background(), "SELECT telegram_id FROM users WHERE id=$1", dbID).Scan(&teleID)
 	if teleID != 0 {
-		target.Bot.Send(&tele.User{ID: teleID}, text, tele.ModeHTML)
+		target.Bot.Send(&tele.User{ID: teleID}, text, opt...)
 	}
 }
 
-func (b *Bot) notifyAdmin(orderID int64, text string, msgType ...string) {
+func (b *Bot) HandlePaymentSuccess(orderID int64) {
+	order, _ := b.Stg.Order().GetByID(context.Background(), orderID)
+	// Guard against duplicate processing/notifications if order is already active or further
+	if order == nil || order.Status != "wait_payment" {
+		b.Log.Info("HandlePaymentSuccess: Skipping (not wait_payment)", logger.Int64("order_id", orderID))
+		return
+	}
+
+	// Update status to active first to prevent double broadcast in case of race/retry
+	err := b.Stg.Order().UpdateStatus(context.Background(), orderID, "active")
+	if err != nil {
+		b.Log.Error("HandlePaymentSuccess: Failed to update status", logger.Error(err))
+		return
+	}
+
+	// 1. Notify Drivers (Broadcast)
+	from, _ := b.Stg.Location().GetByID(context.Background(), order.FromLocationID)
+	to, _ := b.Stg.Location().GetByID(context.Background(), order.ToLocationID)
+	tariff, _ := b.Stg.Tariff().GetByID(context.Background(), order.TariffID)
+
+	fromName, toName, tariffName := "Неизвестно", "Неизвестно", "Неизвестно"
+	if from != nil {
+		fromName = from.Name
+	}
+	if to != nil {
+		toName = to.Name
+	}
+	if tariff != nil {
+		tariffName = tariff.Name
+	}
+
+	priceStr := fmt.Sprintf("%d %s", order.Price, order.Currency)
+	routeStr := fmt.Sprintf("%s ➡️ %s", fromName, toName)
+
+	notifMsg := fmt.Sprintf("✅ <b>Новый оплаченный заказ!</b>\n\n🆔 #%d\n💰 Цена: <b>%s</b>\n📍 %s\n🚕 Тариф: <b>%s</b>\n👥 Пассажиров: <b>%d</b>",
+		order.ID, priceStr, routeStr, tariffName, order.Passengers)
+
+	b.notifyDrivers(order.ID, order.FromLocationID, order.ToLocationID, order.TariffID, notifMsg)
+
+	// 2. Notify Client
+	clientMsg := fmt.Sprintf("✅ <b>Оплата прошла успешно!</b>\n\nВаш заказ #%d активирован. Мы ищем вам водителя.", orderID)
+	b.notifyUser(order.ClientID, clientMsg)
+}
+
+func (b *Bot) notifyAdmin(contextID int64, text string, msgType ...string) {
 	target := b
 	if b.Type != BotTypeAdmin {
 		if p, ok := b.Peers[BotTypeAdmin]; ok {
 			target = p
-			b.Log.Info("Using Admin Bot peer for notification", logger.Int64("order_id", orderID))
+			b.Log.Info("Using Admin Bot peer for notification", logger.Int64("context_id", contextID))
 		} else {
 			b.Log.Error("Admin bot peer not found for notification")
 			return
@@ -2207,19 +2368,19 @@ func (b *Bot) notifyAdmin(orderID int64, text string, msgType ...string) {
 	switch t {
 	case "match":
 		menu.Inline(menu.Row(
-			menu.Data("✅ Подтвердить", fmt.Sprintf("approve_match_%d", orderID)),
-			menu.Data("❌ Отклонить", fmt.Sprintf("reject_match_%d", orderID)),
+			menu.Data("✅ Подтвердить", fmt.Sprintf("approve_match_%d", contextID)),
+			menu.Data("❌ Отклонить", fmt.Sprintf("reject_match_%d", contextID)),
 		))
 	case "registration":
-		// For driver registration, orderID is actually userID
+		// For driver registration, contextID is actually userID
 		menu.Inline(menu.Row(
-			menu.Data(messages["ru"]["admin_btn_approve"], fmt.Sprintf("approve_driver_%d", orderID)),
-			menu.Data(messages["ru"]["admin_btn_reject"], fmt.Sprintf("reject_driver_%d", orderID)),
+			menu.Data(messages["ru"]["admin_btn_approve"], fmt.Sprintf("approve_driver_%d", contextID)),
+			menu.Data(messages["ru"]["admin_btn_reject"], fmt.Sprintf("reject_driver_%d", contextID)),
 		))
 	default:
 		menu.Inline(menu.Row(
-			menu.Data("✅ Подтвердить", fmt.Sprintf("adm_approve_%d", orderID)),
-			menu.Data("❌ Отменить", fmt.Sprintf("adm_reject_%d", orderID)),
+			menu.Data("💰 Назначить цену", fmt.Sprintf("adm_set_price_%d", contextID)),
+			menu.Data("❌ Отклонить", fmt.Sprintf("adm_reject_%d", contextID)),
 		))
 	}
 
@@ -2380,11 +2541,19 @@ func (b *Bot) handleMyOrders(c tele.Context) error {
 			timeStr = o.PickupTime.In(loc).Format("02.01.2006 15:04")
 		}
 
+		statusName := b.GetStatusLabel(o.Status)
+
 		txt := fmt.Sprintf("📦 <b>Заказ #%d</b>\n📍 %s ➡️ %s\n👥 Пассажиры: %d\n📅 Время: %s\n📊 Статус: %s",
-			o.ID, o.FromLocationName, o.ToLocationName, o.Passengers, timeStr, o.Status)
+			o.ID, o.FromLocationName, o.ToLocationName, o.Passengers, timeStr, statusName)
 
 		menu := &tele.ReplyMarkup{}
-		if o.Status == "active" || o.Status == "pending" || o.Status == "wait_confirm" || o.Status == "taken" || o.Status == "on_way" {
+		if o.Status == "wait_payment" {
+			paymentLink := fmt.Sprintf("https://checkout.cloudpayments.ru/pay/%s?amount=%d&orderId=%d", b.Cfg.CPPublicID, o.Price, o.ID)
+			menu.Inline(
+				menu.Row(menu.URL("💳 Оплатить", paymentLink)),
+				menu.Row(menu.Data("❌ Отменить", fmt.Sprintf("cancel_%d", o.ID))),
+			)
+		} else if o.Status == "active" || o.Status == "pending" || o.Status == "wait_confirm" || o.Status == "taken" || o.Status == "on_way" {
 			menu.Inline(menu.Row(menu.Data("❌ Отменить", fmt.Sprintf("cancel_%d", o.ID))))
 		}
 		c.Send(txt, menu, tele.ModeHTML)

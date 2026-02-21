@@ -30,6 +30,9 @@ type Config struct {
 	AdminUsername    string
 	AdminLogin       string
 	AdminPassword    string
+
+	CPPublicID  string
+	CPAPISecret string
 }
 
 func Load() Config {
@@ -58,6 +61,9 @@ func Load() Config {
 	cfg.AdminUsername = cast.ToString(getOrReturnDefault("ADMIN_USERNAME", ""))
 	cfg.AdminLogin = cast.ToString(getOrReturnDefault("ADMIN_LOGIN", "admin"))
 	cfg.AdminPassword = cast.ToString(getOrReturnDefault("ADMIN_PASSWORD", "1234"))
+
+	cfg.CPPublicID = cast.ToString(getOrReturnDefault("CP_PUBLIC_ID", ""))
+	cfg.CPAPISecret = cast.ToString(getOrReturnDefault("CP_API_SECRET", ""))
 
 	return cfg
 }
